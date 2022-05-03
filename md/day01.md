@@ -65,7 +65,7 @@ eureka:
 
 当服务启动后，访问主机的10086/eureka后，就能访问进eureka主页了：
 
-![image-20220503153951027](markdown-img/day01.assets/image-20220503153951027.png)
+![image-20220503153951027](https://user-images.githubusercontent.com/48977889/166444914-80d9d4eb-d6ca-4cc8-bfa7-7372b9a6f573.png)
 
 ### 注册
 
@@ -97,7 +97,7 @@ eureka:
 
 启动了消费者和提供者后(提供者启动2个)，eureka的列表信息如下：
 
-![image-20220503155616152](markdown-img/day01.assets/image-20220503155616152.png)
+![image-20220503155616152](https://user-images.githubusercontent.com/48977889/166444919-e7930c31-0821-426e-bba3-ba722bf95b0c.png)
 
 ### 使用
 
@@ -122,6 +122,22 @@ User user = restTemplate.getForObject(String.format("http://userservice/user/%s"
 
 # 负载均衡
 
+## 4-Ribbon负载均衡流程
+
 知识点3讲到，消费者从eureka获取到所有提供者的主机信息，然后进行负载均衡请求，那么是谁做负载均衡？又是什么时候做的呢？回到@LoadBalanced注解，当RestTemplate被加入@LoadBalanced注解后，调用请求时会被LoadBalanceInterceptor拦截处理请求，**然后被loadBalancer进行处理，在Eureka中默认采用RibbonLoadBalancerClient处理**。最终通过IRule根据特定规则返回本次请求的目的地，默认采用ZoneAvoidanceRule这个规则，当然，也可以采用配置的方式更改或手动实现负载均衡规则。
 
-![image-20220503162547202](markdown-img/day01.assets/image-20220503162547202.png)
+![image-20220503162547202](https://user-images.githubusercontent.com/48977889/166444922-e550751d-7006-42d9-becd-e0f3fa463726.png)
+
+## 5-Ribbon的懒加载
+
+知识点4讲到，当请求提供者时，Ribbon会先从注册中心获取提供者列表，再做负载均衡。实际上，Ribbon默认情况下只有在第一次请求时才会去获取提供者列表，有点类似于MVC容器的初始化也是在第一次请求时才触发的，这也被称为“第一次惩罚”。第一次请求后Ribbon会将提供者列表缓存到JVM内存里，供下次使用。当然，也可以通过配置的方式使Ribbon开启饥饿加载模式，即Java进程启动时就请求Eureka，而不是等到第一次请求发生时。
+
+```yaml
+ribbon:
+  eager-load:
+    enabled: true # 开启饥饿加载
+    clients: # 指定饥饿加载的服务名称
+      - userservice
+```
+
+当然，如果Eureka的服务列表发生了变更，双方应该要有一个通信机制，让Eureka注册者知道应该重新去获取一遍服务列表，而不是一直依赖本地缓存。
