@@ -4,6 +4,7 @@ import cn.itcast.order.pojo.Order;
 import cn.itcast.order.service.OrderService;
 import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,11 +17,20 @@ public class OrderController {
     @Autowired
     private OrderService orderService;
 
+    @Value("${orderConfig}")
+    private String orderConfig;
+
     @SentinelResource("hot")
     @GetMapping("{orderId}")
     public Order queryOrderByUserId(@PathVariable("orderId") Long orderId) {
         // 根据id查询订单并返回
         return orderService.queryOrderById(orderId);
+    }
+
+    @GetMapping("/testNacosConfig")
+    public String testNacosConfig() {
+        // 根据id查询订单并返回
+        return orderConfig;
     }
 
     @GetMapping("/query")
