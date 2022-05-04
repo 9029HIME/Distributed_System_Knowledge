@@ -4,15 +4,19 @@ spring:
   datasource:
     application:
       name: order_service
-    url: jdbc:mysql://localhost:3306/order_service?useSSL=false&serverTimezone=UTC
+    url: jdbc:mysql://localhost:3306/order_service?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: root
     password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver
   application:
     name: orderservice
   cloud:
-#    nacos:
-#      server-addr: localhost:8848 # nacos服务地址
+    nacos:
+      server-addr: localhost:8848 # nacos服务地址
+      discovery:
+        cluster-name: J2
+#          namespace: 4d6ce343-9e1b-44df-a90f-2cf2b6b3d177
+#          ephemeral: false # 是否是临时实例
 #    sentinel:
 #      transport:
 #        dashboard: localhost:8080 # sentinel控制台地址
@@ -25,7 +29,6 @@ spring:
 #            groupId: SENTINEL_GROUP
 #            rule-type: flow # 还可以是：degrade、authority、param-flow
 #      discovery:
-#        namespace: 4d6ce343-9e1b-44df-a90f-2cf2b6b3d177 # dev环境
 #        ephemeral: false # 是否是临时实例
 mybatis:
   type-aliases-package: cn.itcast.user.pojo
@@ -36,13 +39,13 @@ logging:
     cn.itcast: debug
   pattern:
     dateformat: MM-dd HH:mm:ss:SSS
-eureka:
-  client:
-    service-url:  # eureka的地址信息
-      defaultZone: http://127.0.0.1:10086/eureka
-#userservice:
-#  ribbon:
-#    NFLoadBalancerRuleClassName: com.alibaba.cloud.nacos.ribbon.NacosRule  # 负载均衡规则
+#eureka:
+#  client:
+#    service-url:  # eureka的地址信息
+#      defaultZone: http://127.0.0.1:10086/eureka
+userservice:
+  ribbon:
+    NFLoadBalancerRuleClassName: com.alibaba.cloud.nacos.ribbon.NacosRule  # 负载均衡规则
 ribbon:
   eager-load:
     enabled: true # 开启饥饿加载
