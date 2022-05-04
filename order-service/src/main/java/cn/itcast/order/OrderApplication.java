@@ -11,7 +11,8 @@ import org.springframework.web.client.RestTemplate;
 
 @MapperScan("cn.itcast.order.mapper")
 @SpringBootApplication
-//@EnableFeignClients(clients = UserClient.class,defaultConfiguration = DefaultFeignConfiguration.class)
+//day02-12
+@EnableFeignClients
 public class OrderApplication {
 
     public static void main(String[] args) {

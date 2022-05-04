@@ -27,9 +27,10 @@ public class OrderController {
         return orderService.queryOrderById(orderId);
     }
 
+
+    //day02-10
     @GetMapping("/testNacosConfig")
     public String testNacosConfig() {
-        // 根据id查询订单并返回
         return orderConfig;
     }
 

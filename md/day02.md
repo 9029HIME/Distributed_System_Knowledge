@@ -46,3 +46,55 @@
 
 那么问题来了，Nacos全局配置、Nacos环境配置、项目本地配置哪个优先级更高呢？虽然知识点10.2说到先加载Nacos，最后才加载本地配置，但实际上本地配置的优先级是最低的，其次是Nacos全局配置，Nacos环境配置，即**环境配置 ＞ 全局配置 ＞ 本地配置**。至于是为什么，要想想使用Nacos的初衷是为了实现热加载更改、不用重启项目的方式来刷新配置，如果本地配置的优先级最高，那热加载还有什么意义呢。
 
+# 高级远程调用
+
+## 12-OpenFeign
+
+回顾知识点1，RestTemplate是最基本的远程调用方式，配合@LoadBalanced注解使用也能实现RestTemplate的负载均衡。但是RestTemplate需要使用URL+参数的形式调用，并且每一次调用和封装时代码都比较冗余，**不太适用于微服务之间的接口调用，更适用于对接外部接口（如服务商、合作方暴露的接口）**，因此提出一个更优雅的实现：OpenFeign，它是SpringCloud基于Netfix的Feign二次开发的产品，更加兼容SpringCloud。
+
+消费者添加依赖：
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-openfeign</artifactId>
+</dependency>
+```
+
+添加Enable注解：
+
+```java
+@EnableFeignClients
+public class OrderApplication {
+}
+```
+
+消费者添加远程调用接口：
+
+```java
+// 这里的value和提供者的注册名称一致
+@FeignClient("userservice")
+public interface UserClient {
+    @GetMapping("/user/{id}")
+    User queryById(@PathVariable("id") Long id);
+}
+```
+
+值得注意的是接口定义的方法和注解，需要与消费者中定义的一致，**因此后续考虑将通用的定义如返回值，参数等Java文件放在公共的项目中**。
+
+使用远程调用接口：
+
+```java
+@Autowired
+private UserClient userClient;
+
+public Order queryOrderById(Long orderId) {
+        // 1.查询订单
+        Order order = orderMapper.findById(orderId);
+		User user = userClient.queryById(order.getUserId());
+		order.setUser(user);
+}
+```
+
+其实OpenFeign里面已经实现了负载均衡，也是基于Ribbon的，也就是说默认OpenFeign = Ribbon + RestTemplate
+

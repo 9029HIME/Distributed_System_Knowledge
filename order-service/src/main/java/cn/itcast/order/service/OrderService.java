@@ -16,7 +16,7 @@ public class OrderService {
     @Autowired
     private OrderMapper orderMapper;
     @Autowired
-    private RestTemplate restTemplate;
+    private UserClient userClient;
 
 //    @Autowired
 //    private UserClient userClient;
@@ -34,7 +34,12 @@ public class OrderService {
         /*
          day01-3：使用注册中心+restTemplate方式调用，需要在restTemplate上新增@LoadBalanced注解，并且url改为服务名，而不是主机+端口
          */
-        User user = restTemplate.getForObject(String.format("http://userservice/user/%s", order.getUserId()), User.class);
+//        User user = restTemplate.getForObject(String.format("http://userservice/user/%s", order.getUserId()), User.class);
+
+        /*
+         day02-12：进阶版远程调用-使用OpenFeign进行远程调用
+         */
+        User user = userClient.queryById(order.getUserId());
         order.setUser(user);
 
         return order;
