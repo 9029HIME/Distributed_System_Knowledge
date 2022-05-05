@@ -98,3 +98,43 @@ public Order queryOrderById(Long orderId) {
 
 其实OpenFeign里面已经实现了负载均衡，也是基于Ribbon的，也就是说默认OpenFeign = Ribbon + RestTemplate
 
+## 13-OpenFeign的优化1
+
+OpenFeign底层默认使用URLConnection来实现网络请求，但是这个底层组件不支持池化思想，每一次调用都要重新建立连接。可以将OpenFeign的底层客户端改为HttpClient或OKHttp，以HttpClient为例，步骤如下：
+
+1. 引入依赖：
+
+```xml
+<dependency>
+    <groupId>io.github.openfeign</groupId>
+    <artifactId>feign-httpclient</artifactId>
+</dependency>
+```
+
+2. 添加配置：
+
+```yaml
+feign:
+  httpclient:
+    enabled: true # 支持HttpClient的开关
+    max-connections: 200 # 最大连接数
+    max-connections-per-route: 50 # 单个路径的最大连接数
+```
+
+## 14-OpenFeign的优化2
+
+结合实例代码可以发现，消费者和提供者都要使用同一套代码，这样非常地冗余。实际上，可以将服务调用的传参、响应统一放在一个公共模块里，消费者和提供者只需共同依赖这个模块即可。
+
+1. 新建一个common-feign模块，引入feign和HttpClient的依赖，同时userservice和orderservice共同引用common-feign。
+2. 将orderservice的User和UserClient移到common-feign模块里，删除userservice的User。
+3. 但是！！！这样会引发一个问题：UserClient被挪到common-feign后，无法被orderservice的启动类扫描到了，因此需要在启动类加上：
+
+```java
+@MapperScan("cn.itcast.order.mapper")
+@SpringBootApplication
+@EnableFeignClients(basePackages = {"cn.itcast.commonfeign.client"})
+public class OrderApplication {
+}
+```
+
+4. 这样，就能减少代码的冗余，如果userserivce接口内容发生改变，只需改common-feign即可
