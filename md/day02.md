@@ -137,4 +137,74 @@ public class OrderApplication {
 }
 ```
 
-4. 这样，就能减少代码的冗余，如果userserivce接口内容发生改变，只需改common-feign即可
+4. 这样，就能减少代码的冗余，如果userserivce接口内容发生改变，只需改common-feign即可。
+
+# Gateway
+
+## 15-Gateway的整体概念
+
+以前对Gateway的概念比较混淆，现在可以明确的是：**Gateway和Nginx虽然功能相似，但本质却不一样！！！。**总的来说可以这样划分：
+
+1. Nginx：访问的第一层入口，除了微服务外还包含了前端资源的负载均衡，因此Nginx严格意义上来说不属于微服务的一部分。**它的负载均衡是针对外部请求到本机应用的**。
+2. Gateway：被Nginx代理后，访问的第二层入口，**本质上属于微服务的一部分**，可以理解为**微服务的网关**，用来路由并负载均衡到本次业务第一个需要的微服务。**它的负载均衡是针对外部请求到微服务的**。
+3. Ribbon：不属于访问入口，它通过注册中心找到目标地址后，通过负载均衡请求到具体的服务实例，本质属于微服务的一部分。**它的负载均衡是针对微服务之间的调用**。
+
+一般来说，请求先经过Nginx转发到Gateway，再通过Gateway转发到具体的服务实例A，实例A可能立即返回结果，也可能通过Ribbon+注册中心请求其他服务实例B后，将结果整合并返回。
+
+Gateway的作用：
+
+1. 可以对请求进行一次全局的身份验证、权限校验
+2. 负载均衡
+3. 请求限流
+
+Gateway主流有两种选型：Zuul和gateway（小写），现在基本用gateway。
+
+## 16-gateway搭建
+
+1. gateway本质是一个Java微服务应用，因此第一步先导入Nacos和gateway依赖：
+
+```xml
+<!--nacos服务注册发现依赖-->
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+</dependency>
+<!--网关gateway依赖-->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-gateway</artifactId>
+</dependency>
+```
+
+2. 添加gateway配置：
+
+```yaml
+spring:
+  application:
+    name: gateway
+  cloud:
+    nacos:
+      server-addr: localhost:8848 # nacos地址
+    gateway:
+      routes:
+        - id: user-service # 路由标示，必须唯一
+          uri: lb://userservice # 路由的目标地址
+          predicates: # 路由断言，判断请求是否符合规则
+            - Path=/user/** # 路径断言，判断路径是否是以/user开头，如果是则符合
+        - id: order-service
+          uri: lb://orderservice
+          predicates:
+            - Path=/order/**
+```
+
+ 路由标示代表着一个gateway转发，可以理解为一个gateway转发规则的id
+
+ 目标地址代表要转发过去的目的地，lb://代表使用负载均衡，userservice是Nacos里的服务名。
+
+ 路由断言表示uri通配符，可以配多个
+
+ 总的来说，如果转发到gateway的请求路径命中了某个**路由表示**的**路由断言**，则将该请求转发到**目标地址**对应的服务实例那。
+
+本地启动gateway实例，试试请求localhost:10010/order/1，发现可以请求成功。
+
+![image](https://user-images.githubusercontent.com/48977889/166942919-920735b7-acbd-4f4e-815e-a4339638b851.png)
