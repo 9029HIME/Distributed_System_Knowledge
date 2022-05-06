@@ -208,3 +208,152 @@ spring:
 本地启动gateway实例，试试请求localhost:10010/order/1，发现可以请求成功。
 
 ![image](https://user-images.githubusercontent.com/48977889/166942919-920735b7-acbd-4f4e-815e-a4339638b851.png)
+
+## 17-gateway路由断言工厂
+
+对于**断言**来说，除了使用路径断言外还能使用其他层面的断言，比如请求时间断言、请求头断言（请求必须带某个请求头才命中断言）等，SpringCloud提供了以下几种断言工厂，除了这些以外也可以通过代码实现自定义路由断言工厂：
+
+![image](https://user-images.githubusercontent.com/48977889/167129518-82060ac7-fc90-4eab-868d-2220bd87bce1.png)
+
+## 18-gateway过滤器
+
+gateway过滤器负责处理外部对微服务的请求与**微服务对外部的响应**：
+
+![image](https://user-images.githubusercontent.com/48977889/167129989-651a84c5-caf0-4fc3-9cc7-06b9ac8d9435.png)gateway过滤器有三种：
+1.普通过滤器：针对某一个路由，在命中断言，转发到服务实例之前执行。
+2.default过滤器：针对所有路由，任何一个路由命中断言后，转发到服务实例之前执行。
+不管是普通过滤器还是default过滤器，本质是GatewayFilterFactory派生的过滤器，SpringCloud官方提供了许多此类过滤器，当然也可以手动去写一个。
+
+![ea5194c565700c1e7382376e2baea74](https://user-images.githubusercontent.com/48977889/167129787-06cbd447-4284-4676-8df8-299138860e16.jpg)
+
+3.全局过滤器：与GatewayFilterFactory不同，全局过滤器是基于GlobalFilter派生的，**它也是对所有路由作过滤的过滤器**。SpringCloud提供了以下全局过滤器，也可以手动实现一个。
+
+![199d6330057b5f41455c56096d8360f](https://user-images.githubusercontent.com/48977889/167129799-b16cf9b0-a236-4de7-b254-c3019e36385d.jpg)
+
+普通、default过滤器和全局过滤器的区别是什么？我认为普通和default主要配合配置文件来使用，它们的核心要求是**配置+路由**。而全局过滤器只需要通过代码来实现核心逻辑，只要有这个全局过滤器，那么经gateway转发的请求都要过滤一遍。
+
+## 19-gateway普通过滤器与default过滤器
+
+gateway配置文件加上：
+
+```yaml
+gateway:
+  routes:
+    - id: user-service # 路由标示，必须唯一
+      uri: lb://userservice # 路由的目标地址
+      predicates: # 路由断言，判断请求是否符合规则
+        - Path=/user/** # 路径断言，判断路径是否是以/user开头，如果是则符合
+    - id: order-service
+      uri: lb://orderservice
+      predicates:
+        - Path=/order/**
+      filters:
+        - AddRequestHeader=test,Hello~Filter!!!
+```
+
+这里的- AddRequestHeader=test,Hello~Filter!!!代表为order-service这个路由添加一个AddRequestHeader普通过滤器，当gateway将请求转发到orderservice时会新增一个Header过去，这个Header的Key是test，Value是Hello~Filter!!!，orderservice新增以下代码：
+
+```java
+@GetMapping("/testAddHeader")
+public void testAddHeader(@RequestHeader("test") String test){
+    System.out.println("test:"+test);
+}
+```
+
+curl http://localhost:10010/order/testAddHeader后，控制台输出test:Hello~Filter!!!
+
+对于default过滤器，则需要这样添加：
+
+```yaml
+gateway:
+  routes:
+    - id: user-service # 路由标示，必须唯一
+      uri: lb://userservice # 路由的目标地址
+      predicates: # 路由断言，判断请求是否符合规则
+        - Path=/user/** # 路径断言，判断路径是否是以/user开头，如果是则符合
+    - id: order-service
+      uri: lb://orderservice
+      predicates:
+        - Path=/order/**
+      filters:
+        - AddRequestHeader=test,Hello~Filter!!!
+  default-filters:
+    - AddRequestHeader=origin,gateway
+```
+
+default-filters与routes同级，代表在所有的路由在命中后都会执行，orderservice新增以下代码：
+
+```java
+@GetMapping("/testDefaultAddHeader")
+public void testDefaultAddHeader(@RequestHeader("origin") String origin){
+    System.out.println("origin:"+origin);
+}
+```
+
+curl http://localhost:10010/order/testDefaultAddHeader后，控制台输出origin:gateway
+
+## 20-全局过滤器
+
+以下手动实现一个全局过滤器，作用是判断请求是否有authorization这个头，并判断这个头的值，如果为admin，则放行（当然实际不会那么简单，只是作为一个参考例子而已）：
+
+```java
+@Order(-1)
+@Component
+public class AuthorizeFilter implements GlobalFilter {
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        // 1.获取请求参数
+        ServerHttpRequest request = exchange.getRequest();
+        MultiValueMap<String, String> params = request.getHeaders();
+        // 2.获取参数中的 authorization 参数
+        String auth = params.getFirst("authorization");
+        // 3.判断参数值是否等于 admin
+        if ("admin".equals(auth)) {
+            // 4.是，放行
+            return chain.filter(exchange);
+        }
+        // 5.否，拦截
+        // 5.1.设置状态码
+        exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+        // 5.2.拦截请求
+        return exchange.getResponse().setComplete();
+    }
+}
+```
+
+## 21-过滤器的执行熟悉
+
+如果同时定义了3种过滤器，那么它们的执行顺序会是怎么样的呢？其实当请求命中断言，转发其中一个路由后，gateway会将所有过滤器都放在一个集合（GlobalFilter其实用了适配器模式，有一个GatewayFilterAdapter类继承了GatewayFilter，同时适配了GlobalFilter，因此它们本质属于同一类）里，排序后依次执行，那么排序的规则就很重要了。
+
+排序的规则和Spring的Order规则是一样的，过滤器的Order越小，优先级越高，排得越前。
+
+当三种过滤器都使用同一个Order值时，优先执行default过滤器、gateway过滤器、全局过滤器。即DefaultFlter > GatewayFilter > GlobalFilter。
+
+## 22-gateway的CORS跨域配置
+
+回顾一下跨域的过程与解决
+
+1. 跨域作为保证客户端安全的机制，其实是浏览器的限制，不是微服务之间会出现的。
+2. 由于浏览器同源策略的限制，浏览器不允许前端应用向域名不同或端口不同的地址发起ajax请求。
+3. CORS机制是浏览器在请求跨域资源时，先会发一个options请求，询问后端服务器是否允许请求，如果允许，则请求。这样跨域问题就解决了。
+
+那么对于gateway的跨域配置，可以参考以下：
+
+```yaml
+gateway:
+  globalcors:
+    add-to-simple-url-handler-mapping: true # 是否开启options询问机制
+    cors-configurations:
+      '[/**]':
+        allowedOrigins: # 允许哪些来源
+          - "http://localhost:8812"
+        allowedMethods: # 允许跨域的请求方式
+          - "GET"
+          - "POST"
+          - "DELETE"
+          - "PUT"
+          - "OPTIONS"
+        allowedHeaders: "*" # 允许跨域所携带的请求头信息
+        allowedCredentials: true # 是否允许携带cookie
+        maxAge: 360000 # options询问机制的缓存时间
+```

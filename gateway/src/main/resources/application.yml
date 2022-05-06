@@ -21,6 +21,22 @@ spring:
           uri: lb://orderservice
           predicates:
             - Path=/order/**
+          filters:
+            - AddRequestHeader=test,Hello~Filter!!!
       default-filters:
-        - AddRequestHeader=Truth,Itcast is freaking awesome!
         - AddRequestHeader=origin,gateway
+      globalcors:
+        add-to-simple-url-handler-mapping: true # 是否开启options询问机制
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: # 允许哪些来源
+              - "http://localhost:8812"
+            allowedMethods: # 允许跨域的请求方式
+              - "GET"
+              - "POST"
+              - "DELETE"
+              - "PUT"
+              - "OPTIONS"
+            allowedHeaders: "*" # 允许跨域所携带的请求头信息
+            allowedCredentials: true # 是否允许携带cookie
+            maxAge: 360000 # options询问机制的缓存时间
