@@ -14,8 +14,12 @@ public class OrderService {
 
     @Autowired
     private OrderMapper orderMapper;
+
     @Autowired
     private UserClient userClient;
+
+    @Autowired
+    private SecondService secondService;
 
 //    @Autowired
 //    private UserClient userClient;
@@ -44,10 +48,17 @@ public class OrderService {
         return order;
     }
 
+    // sentinel资源细分到service-api day03-28-链路
     @SentinelResource("goods")
     public void queryGoods(){
         System.err.println("查询商品");
+        // resource-api的级联关系 day03-28-链路
+        secondService.querySecond();
     }
+
+
+
+
 
     /*@Autowired
     private RestTemplate restTemplate;

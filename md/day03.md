@@ -52,7 +52,7 @@ spring:
 	cloud:
 		sentinel:
       		transport:
-        	dashboard: localhost:8080
+        		dashboard: localhost:8080
 ```
 
 服务实例启动后，访问一次服务实例，触发sentinel监控：
@@ -85,5 +85,121 @@ Sentinel流控模式有3种：直接、关联、链路，默认使用直接模�
 
 1其实比较好理解，但2和3的应用场景在哪呢？
 
-先说2，假设有这么个场景：查询订单和创建订单，对于产品来说，肯定是创建订单重要点毕竟有收益。如果在业务高峰期大部分是创建订单的请求，那么就有必要限制一下查询订单的请求，让多余的线程去服务创建订单，保证生产收益，至于查询请求可以放缓或者拒绝，让用户过一会儿再访问。落实到关联模式的话，当前资源就是查询订单接口，另一个资源就是创建订单接口。用以下代码举例：
+### 关联
+
+先说2，假设有这么个场景：查询订单和创建订单，对于产品来说，肯定是创建订单重要点毕竟有收益。如果在业务高峰期大部分是创建订单的请求，那么就有必要限制一下查询订单的请求，让多余的线程去服务创建订单，保证生产收益，至于查询请求可以放缓或者拒绝，让用户过一会儿再访问。落实到关联模式的话，当前资源就是查询订单接口，另一个资源就是创建订单接口。用以下orderservice代码举例：
+
+```java
+    @GetMapping("/query")
+    public String queryOrder() {
+        System.err.println("查询订单");
+        return "查询订单成功";
+    }
+
+    @GetMapping("/save")
+    public String saveOrder() {
+        System.err.println("新增订单");
+        return "新增订单成功";
+    }
+```
+
+我希望save接口QPS达到2时，限制query接口的访问，保证更多的线程来服务save接口：
+
+![image](https://user-images.githubusercontent.com/48977889/169039004-28cafaab-9cdb-4b07-a647-ded84730158b.png)
+
+![image](https://user-images.githubusercontent.com/48977889/169039575-7eed29ae-e9ab-4d8e-b38c-42f245bcf3eb.png)
+
+### 链路
+
+再说3.的场景，这次是查询订单和新增订单。正常业务场景下，这两个接口都会触发商品的查询，现在的需求希望优先保证新增订单的商品查询功能，减少查询订单的商品查询功能，**这时候资源应该作为一个service-api来处理**，而不是一个handler来处理了。sentinel对此的实现很简单，只需在对应api上面加上@SentinelResource(资源名)即可：
+
+```java
+@SentinelResource("goods")
+public void queryGoods(){
+    System.err.println("查询商品");
+    secondService.querySecond();
+}
+```
+
+```java
+@Service
+public class SecondService {
+    
+    @SentinelResource("second")
+    public void querySecond(){
+        System.err.println("查询商品2");
+    }
+    
+}
+```
+
+```java
+@GetMapping("/query")
+public String queryOrder() {
+    // 查询商品
+    orderService.queryGoods();
+    // 查询订单
+    System.err.println("查询订单");
+    return "查询订单成功";
+}
+
+@GetMapping("/save")
+public String saveOrder() {
+    // 查询商品
+    orderService.queryGoods();
+    // 查询订单
+    System.err.println("新增订单");
+    return "新增订单成功";
+}
+```
+
+但是！！！默认情况下Sentinel只会基于MVC路由器为根节点去派生资源，也就是说默认情况下只将系统上的handler作为资源，而不是API。想要细分到API级别需要加上配置：
+
+```yaml
+spring:
+	cloud:
+		sentinel:
+      		transport:
+        		dashboard: localhost:8080
+        	web-context-unify: false # 关闭context整合
+```
+
+这样刷新一下sentinel，就会发现资源从细分到handler变成细分到resource-api了，甚至还能细分resource-api调用了哪些其他resource-api（前提得通过注入方式调用）：
+
+![image](https://user-images.githubusercontent.com/48977889/169043577-f7b9e720-7043-43b3-94a6-3081ed4b8708.png)
+
+回到需求，我希望service-api1这个方法在查询订单时能控制好QPS，只需这样配置：
+
+![截图_选择区域_20220518205901](https://user-images.githubusercontent.com/48977889/169044983-2eaba35d-815b-4a58-afed-3cc6b1c1f428.png)
+
+这样，当query接口导致的goods-api调用超出阈值，就会限流，返回失败信息，而save接口导致的goods-api却不会。
+
+## 29-Sentinel使用之流控效果
+
+知识点28讲述的流控模式定义**什么时候触发流控**，而这里的流控效果定义**触发流控之后，该怎么Sentinel该怎么做**。主要有三种：
+
+1. 快速失败：知识点27和知识点28演示的就是快速失败，触发流控后直接抛出FlowException，建议在代码上对这个异常做全局处理。
+
+2. Warm Up：和快速失败差不多，不过最初的阈值是很低的，会从最低值逐渐变化为自定义值。初始最低值为(自定义值/coldFactor)，coldFactor默认为3。
+
+3. 排队等待：和前面2种不太一样，它们都是超出阈值就响应失败。但排队等待是将请求放在1个队列里，按照**阈值划分时间间隔**依次执行，这个队列是FIFO的，如果请求在进队列前发现等待时间（可以根据时间间隔x对内请求数算出）超过**设置好的timeout**，则响应请求失败。如图所示：
+
+   ![image](https://user-images.githubusercontent.com/48977889/169048317-e1a9f4d3-5054-4f29-9c01-16b68974c250.png)
+
+   这时QPS=5，timeout=2000ms的效果，如果timeout时间长一点、或者QPS阈值大一点，那么队列里的节点数也会变多。使用排队等待效果，可以达到流量削峰和流量整形的作用，而不是直接拒绝。
+
+## 30-Sentinel使用之热点参数限流
+
+这个功能是细化到同一资源不同请求参数的限流了，比如某个资源它被传入参数A的次数会比参数B的次数多很多，就可以配置资源被传入参数A时候的QPS，而传入参数B时不受影响，不过这个功能有两个槽点，因此这里仅作为了解，有需要的话以后翻阅文档查看：
+
+1. 必须是@SentinelResource注解之下的资源，虽然handler或者service-api都可以这样用。
+2. 只能限定参数类型为基本数据类型、String的资源，如果采用对象包装参数的方式，就不可用了。
+
+## 31-Sentinel限流资源的粒度
+
+由大到小分别是：handler（默认）、service-api（配置web-context-unify: false）、参数（配置参数限流）。
+
+
+
+
 

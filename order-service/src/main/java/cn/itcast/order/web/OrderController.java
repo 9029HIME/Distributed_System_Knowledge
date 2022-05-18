@@ -30,7 +30,7 @@ public class OrderController {
         System.out.println("origin:"+origin);
     }
 
-    @SentinelResource("hot")
+//    @SentinelResource("hot")
     @GetMapping("{orderId}")
     public Order queryOrderByUserId(@PathVariable("orderId") Long orderId) {
         // 根据id查询订单并返回
