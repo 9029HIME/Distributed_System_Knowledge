@@ -17,9 +17,9 @@ spring:
         cluster-name: J1
 #          namespace: 4d6ce343-9e1b-44df-a90f-2cf2b6b3d177
 #          ephemeral: false # 是否是临时实例
-#    sentinel:
-#      transport:
-#        dashboard: localhost:8080 # sentinel控制台地址
+    sentinel:
+      transport:
+        dashboard: localhost:8080 # sentinel控制台地址
 #      web-context-unify: false # 关闭context整合
 #      datasource:
 #        flow:

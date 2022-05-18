@@ -32,4 +32,58 @@
 
 ## 25-sentinel控制台的搭建
 
-有点类似Nacos控制台，Sentinel关键实现需要耦合在服务实例的代码里，控制台起到监控和热更改的作用，首先下载官方提供的sentinel-dashboard的jar包，它已经集成好前后端功能了，只需
+有点类似Nacos，Sentinel关键实现需要耦合在服务实例的代码里，控制台起到监控和热更改的作用，首先下载官方提供的sentinel-dashboard的jar包，它已经集成好前后端功能了，只需java -jar打开即可，默认端口是8080，默认账密是sentinel
+
+## 26-代码整合sentinel
+
+引入依赖：
+
+```xml
+<dependency>
+    <groupId>com.alibaba.cloud</groupId>
+    <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+</dependency>
+```
+
+添加配置：
+
+```yaml
+spring:
+	cloud:
+		sentinel:
+      		transport:
+        	dashboard: localhost:8080
+```
+
+服务实例启动后，访问一次服务实例，触发sentinel监控：
+
+![image](https://user-images.githubusercontent.com/48977889/168964097-74ccd2c1-5a17-47bc-883e-eae7f0038ac3.png)
+
+# Sentinel使用
+
+## 27-Sentinel使用之簇点链路与基本流控
+
+簇点链路即Sentinel'被监控的一个资源，默认情况下Sentinel的簇点链路是SpringMVC的每一个接口，也就是说默认情况下SpringMVC的每一个接口都是Sentinel被监控的资源。熔断和流控都是基于资源来控制的。
+
+Sentinel最基本的流控是限定资源的QPS，在流控操作中可以配置，如修改/order/{orderId}这个接口（资源）的QPS不能超过1，否则直接流控：
+
+![image](https://user-images.githubusercontent.com/48977889/168964980-de5a7eb1-2e0b-4734-841e-18b6a27b699e.png)
+
+![image](https://user-images.githubusercontent.com/48977889/168965009-bebd4a63-a567-4e0e-a550-3cb633142788.png)
+
+此时不停地请求，可以看到触发了Sentinel的流控机制：
+
+![image](https://user-images.githubusercontent.com/48977889/168965141-fe5109ac-55d8-424b-8d34-ca9c8d198f4c.png)
+
+## 28-Sentinel使用之流控模式
+
+Sentinel流控模式有3种：直接、关联、链路，默认使用直接模式。
+
+1. 直接：统计**当前资源**的请求，当达到阈值时直接对**当前资源**限流，知识点27就是典型的直接模式。
+2. 关联：统计当前资源关联的**另一个资源的请求**，到达阈值时对**当前资源**限流。
+3. 链路：统计**来自指定链路**访问当前资源的请求，到达阈值时只对**来自该链路的请求**限流。
+
+1其实比较好理解，但2和3的应用场景在哪呢？
+
+先说2，假设有这么个场景：查询订单和创建订单，对于产品来说，肯定是创建订单重要点毕竟有收益。如果在业务高峰期大部分是创建订单的请求，那么就有必要限制一下查询订单的请求，让多余的线程去服务创建订单，保证生产收益，至于查询请求可以放缓或者拒绝，让用户过一会儿再访问。落实到关联模式的话，当前资源就是查询订单接口，另一个资源就是创建订单接口。用以下代码举例：
+
