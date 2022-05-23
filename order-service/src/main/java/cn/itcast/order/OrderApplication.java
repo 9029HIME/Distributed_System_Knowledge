@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.web.client.RestTemplate;
 
 @MapperScan("cn.itcast.order.mapper")
@@ -14,6 +15,7 @@ import org.springframework.web.client.RestTemplate;
 //day02-12
 //day02-14.3
 @EnableFeignClients(basePackages = {"cn.itcast.commonfeign.client"})
+@ComponentScan(basePackages = {"cn.itcast.commonfeign","cn.itcast.order"})
 public class OrderApplication {
 
     public static void main(String[] args) {

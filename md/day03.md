@@ -199,7 +199,69 @@ spring:
 
 由大到小分别是：handler（默认）、service-api（配置web-context-unify: false）、参数（配置参数限流）。
 
+## 32-隔离与熔断
 
+限流只是用来控制QPS，防止因QPS过高引起的服务故障，**属于预防作用**。但是对于已经发生故障的下游来说，流控起不到任何作用，这时候就需要Sentinel的隔离和熔断来对**资源故障**进行处理了。注意，这里阐述的是资源，而非下游服务，对于Sentinel来说，不管是熔断，限流还是隔离，都是针对资源来说的，而不是远程调用，**只不过实际开发中更多远程调用做这三个操作**。比如说我可以对handler做隔离熔断，也可以对service-api做隔离熔断。
 
+## 33-Sentinel使用之自定义降级
 
+什么是降级？我这里下一个定义：**当请求资源发生流控、隔离、熔断后，Sentinel做出的处理，默认是抛出一个异常。**但是正常情况下仅依赖Sentinel默认抛异常肯定是不足够的，所以需要我们开发来自定义降级逻辑，有2种方式：1.整合Feign，对feign的请求自定义降级逻辑 2.整合@SentinelResource，对sentinel资源的处理自定义降级逻辑。
+
+### 自定义降级整合Feign
+
+1. 修改配置：
+
+```yaml
+feign:
+	sentinel:
+		enabled: true
+```
+
+2. 在feign模块自定义FallbackFactory，声明具体的降级逻辑：
+
+   ```java
+   @Component
+   public class UserClientFallbackFactory implements FallbackFactory<UserClient> {
+       @Override
+       public UserClient create(Throwable throwable) {
+           return new UserClient() {
+               @Override
+               public User queryById(Long id) {
+                   User user = new User();
+                   user.setUsername("sentinel fallback");
+                   user.setAddress("sentinel fallback");
+                   return user;
+               }
+           };
+       }
+   }
+   ```
+
+3. 对@FeignClient声明使用哪个失败工厂：
+
+   ```java
+   @FeignClient(value = "userservice",fallbackFactory = UserClientFallbackFactory.class)
+   public interface UserClient {
+       @GetMapping("/user/{id}")
+       User queryById(@PathVariable("id") Long id);
+   }
+   ```
+
+4. 毕竟是跨模块导包，记得在client使用方的服务里加上包扫描：
+
+   ```java
+   @ComponentScan(basePackages = {"cn.itcast.commonfeign","cn.itcast.order"})
+   public class OrderApplication {
+   }
+   ```
+
+5. 此时就能发现FeignClient对应的方法成功作为**资源**整合进sentinel里了：
+
+   ![image](https://user-images.githubusercontent.com/48977889/169748938-5a2ad71f-6908-47d6-805a-f9ac03e5e5fb.png)
+
+6. 实验一下给这个资源限制QPS=2，触发流控规则，看看效果：
+
+   ![image](https://user-images.githubusercontent.com/48977889/169749256-77e8bc6a-9a90-4917-a54c-9b1787aec374.png)
+
+### 对@SentinelResource自定义降级
 
