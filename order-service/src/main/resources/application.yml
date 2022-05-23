@@ -2,8 +2,6 @@ server:
   port: 8088
 spring:
   datasource:
-    application:
-      name: order_service
     url: jdbc:mysql://localhost:3306/order_service?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: root
     password: 123456

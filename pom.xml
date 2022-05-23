@@ -13,6 +13,10 @@
         <module>eureka-server</module>
         <module>common-feign</module>
         <module>gateway</module>
+        <module>seata-account-service</module>
+        <module>seata-order-service</module>
+        <module>seata-storage-service</module>
+
     </modules>
 
     <packaging>pom</packaging>
@@ -31,6 +35,9 @@
         <spring-cloud.version>Hoxton.SR8</spring-cloud.version>
         <mysql.version>8.0.29</mysql.version>
         <mybatis.version>2.1.1</mybatis.version>
+        <mybatis.plus.version>3.3.0</mybatis.plus.version>
+        <seata.version>1.4.2</seata.version>
+        <alibaba.version>2.2.5.RELEASE</alibaba.version>
     </properties>
 
     <dependencyManagement>
@@ -63,7 +70,6 @@
                 <artifactId>mybatis-spring-boot-starter</artifactId>
                 <version>${mybatis.version}</version>
             </dependency>
-
         </dependencies>
     </dependencyManagement>
     <dependencies>
