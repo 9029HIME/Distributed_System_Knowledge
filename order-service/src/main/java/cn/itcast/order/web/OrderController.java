@@ -66,4 +66,9 @@ public class OrderController {
     public String updateOrder() {
         return "更新订单成功";
     }
+
+    @GetMapping("/customOrder")
+    public Order customOrder(){
+        return orderService.customOrder();
+    }
 }

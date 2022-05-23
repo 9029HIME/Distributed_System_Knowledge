@@ -265,3 +265,60 @@ feign:
 
 ### 对@SentinelResource自定义降级
 
+有以下代码，如果要对customOrder这个资源自定义降级，该如何做呢？
+
+```java
+@GetMapping("/customOrder")
+public Order customOrder(){
+    return orderService.customOrder();
+}
+```
+
+```java
+@SentinelResource("customOrder")
+public Order customOrder(){
+    Order order = new Order();
+    order.setName("自定义订单");
+    order.setNum(3);
+    order.setPrice(999L);
+    return order;
+}
+```
+
+1. 新建自定义降级方法，方法参数和返回值需要与整合的资源一致：
+
+   ```java
+   public Order customOrderFallback(){
+       Order order = new Order();
+       order.setName("sentinel resource fallback");
+       order.setNum(-1);
+       order.setPrice(-1L);
+       return order;
+   }
+   ```
+
+2. 在@SentinelResource内声明降级方法名（降级方法和资源需要在同一类）：
+
+   ```java
+   @SentinelResource(value = "customOrder",fallback = "customOrderFallback")
+   public Order customOrder(){
+       Order order = new Order();
+       order.setName("自定义订单");
+       order.setNum(3);
+       order.setPrice(999L);
+       return order;
+   }
+   
+   public Order customOrderFallback(){
+       Order order = new Order();
+       order.setName("sentinel resource fallback");
+       order.setNum(-1);
+       order.setPrice(-1L);
+       return order;
+   }
+   ```
+
+3. 最终效果：
+
+   ![image](https://user-images.githubusercontent.com/48977889/169751163-cb68a99b-e7ee-4240-b719-719b836fac08.png)
+

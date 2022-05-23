@@ -57,6 +57,24 @@ public class OrderService {
     }
 
 
+    @SentinelResource(value = "customOrder",fallback = "customOrderFallback")
+    public Order customOrder(){
+        Order order = new Order();
+        order.setName("自定义订单");
+        order.setNum(3);
+        order.setPrice(999L);
+        return order;
+    }
+
+    public Order customOrderFallback(){
+        Order order = new Order();
+        order.setName("sentinel resource fallback");
+        order.setNum(-1);
+        order.setPrice(-1L);
+        return order;
+    }
+
+
 
 
 
