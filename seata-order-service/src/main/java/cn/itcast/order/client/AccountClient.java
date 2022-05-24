@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 /**
  * @author 虎哥
  */
-@FeignClient("account-service")
+@FeignClient("seata-account-service")
 public interface AccountClient {
 
     @PutMapping("/account/{userId}/{money}")

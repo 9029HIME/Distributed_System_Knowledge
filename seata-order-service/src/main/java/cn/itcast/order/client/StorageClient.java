@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 /**
  * @author 虎哥
  */
-@FeignClient("storage-service")
+@FeignClient("seata-storage-service")
 public interface StorageClient {
     @PutMapping("/storage/{code}/{count}")
     void deduct(@PathVariable("code") String code, @PathVariable("count") Integer count);
