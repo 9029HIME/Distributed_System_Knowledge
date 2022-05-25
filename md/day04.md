@@ -342,7 +342,7 @@ Eventually Consistent：最终一致性，在软状态结束后，集群内的�
    store.db.driverClassName=com.mysql.cj.jdbc.Driver
    store.db.url=jdbc:mysql://127.0.0.1:3306/seata?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
    store.db.user=root
-   store.db.password=12356
+   store.db.password=123456
    store.db.minConn=5
    store.db.maxConn=30
    store.db.globalTable=global_table
@@ -423,11 +423,55 @@ Eventually Consistent：最终一致性，在软状态结束后，集群内的�
    SET FOREIGN_KEY_CHECKS = 1;
    ```
 
-6. 启动Seata：
+6. 在seata的lib路径下存放mysql的驱动
 
+   ![截图_dde-file-manager_20220525203731](https://user-images.githubusercontent.com/48977889/170264939-d40f9666-09d4-4bde-9987-e8af44ba431a.png)
    
+7. 直接./seata-server.sh 启动seata：
 
-微服务集成Seata：
+   ![image](https://user-images.githubusercontent.com/48977889/170265881-828ddc72-f908-4504-96a2-a5ba63efd9ad.png)
+
+## 45-微服务集成Seata：
 
 1. 微服务引入依赖：
+
+   ```xml
+   <dependency>
+       <groupId>com.alibaba.cloud</groupId>
+       <artifactId>spring-cloud-starter-alibaba-seata</artifactId>
+       <exclusions>
+           <exclusion>
+               <artifactId>seata-spring-boot-starter</artifactId>
+               <groupId>io.seata</groupId>
+           </exclusion>
+       </exclusions>
+   </dependency>
+   <dependency>
+       <groupId>io.seata</groupId>
+       <artifactId>seata-spring-boot-starter</artifactId>
+       <version>${seata.version}</version>
+   </dependency>
+   ```
+
 2. 添加配置：
+
+   ```yaml
+   seata:
+     registry:
+       type: nacos
+       nacos:
+         server-addr: 127.0.0.1:8848
+         namespace: ""
+         group: DEFAULT_GROUP
+         application: seata-tc-server
+         username: nacos
+         password: nacos
+     tx-service-group: seata-demo # 事务组名称
+     service:
+       vgroup-mapping: # 事务组与cluster的映射关系
+         seata-demo: MY
+   ```
+
+3. 启动微服务后，可以看到Seata日志显示有服务接入：
+
+   ​	![image](https://user-images.githubusercontent.com/48977889/170268340-0a5e052d-a439-497c-8a3b-c735b1e1a84f.png)
