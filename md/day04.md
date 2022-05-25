@@ -254,3 +254,180 @@ Eventually Consistent：最终一致性，在软状态结束后，集群内的�
 
 # Seata
 
+## 42-Seata三大角色：
+
+![image](https://user-images.githubusercontent.com/48977889/170185286-07269a1e-6843-4e81-a0c4-8275ec54a4eb.png)
+
+1. TC：即Transaction Coordinator，也就是知识点41提出的事务协调者，它维护着全局事务、子事务的状态，**决定全局事务的提交和回滚**。
+2. TM：即Transaction Manager事务管理者，用来定义全局事务的范围，划分子事务有哪些，向TC**提交全局事务的开启行为**。
+3. RM：即Resource Manager资源管理器，管理分支事务的开始，向TC报告分支事务的状态。
+
+三大角色的流程：
+
+1. 开始全局事务，TM向TC注册全局事务，注册行为会通知全局事务的范围，子事务的标识与数量。
+2. RM代理子事务的执行流程，向TC注册当前子事务，**并声明属于哪个全局事务**。
+3. RM执行子事务流程，向TC报告子事务的结果。
+4. TM发现所有子事务都**调用完毕（非执行完毕）**，向TC提交全局事务。
+5. TC等待所有子事务的执行结果，**根据子执行结果决定下一步操作**。
+
+## 43-Seata四种分布式事务解决方案：
+
+知识点42可以看到，Seata会根据子事务结果做进一步操作，那么这个进一步操作到底是什么呢？根据对Seata的配置有以下解决方案：
+
+1. XA模式：强一致性分阶段事务模式（CP），牺牲一定可用性，无业务侵入。
+2. TCC模式：最终一致性分阶段事务模式（AP），有业务侵入。
+3. AT模式：最终一致性分阶段事务模式（AP），无业务侵入，**Seata的默认模式**。
+4. SAGA模式：长事务模式，有业务侵入。
+
+当然，这四种模式会在下面的知识点慢慢介绍。
+
+## 44-部署TC：
+
+所谓分布式事务的协调者，TC其实需要单独部署：
+
+1. 解压Seata：
+
+   ![image](https://user-images.githubusercontent.com/48977889/170188185-f3d12a26-9b95-4115-b354-1d03e8f85cb4.png)
+
+2. Seata需要作为服务注册到注册中心里，比如注册进nacos：
+
+   打开seata目录下的conf/registry.conf文件，修改注册配置：
+
+   ```
+   registry {
+     # file 、nacos 、eureka、redis、zk、consul、etcd3、sofa
+     type = "nacos"	#使用nacos
+   
+     nacos {
+       application = "seata-tc-server"	#seata作为微服务，注册进nacos的名字
+       serverAddr = "127.0.0.1:8848"	#nacos地址
+       group = "DEFAULT_GROUP"			#因为微服务注册进nacos默认是DEFAULT_GROUP，这里要保持一致
+       namespace = ""
+       cluster = "MY"					#自定义集群名称
+       username = "nacos"				#nacos账密
+       password = "nacos"
+     }
+     
+   }
+   ```
+
+3. Seata使用nacos的配置管理：
+
+   打开seata目录下的conf/registry.conf文件，修改注册配置：
+
+   ```
+   config {
+     # file、nacos 、apollo、zk、consul、etcd3
+     type = "nacos"  #使用nacos配置
+   
+     nacos {
+       serverAddr = "127.0.0.1:8848"	#nacos地址
+       namespace = ""	
+       group = "SEATA_GROUP"			#配置所属的组
+       username = "nacos"					#nacos账密
+       password = "nacos"
+       dataId = "seataServer.properties"	#使用组内哪一个配置
+     }
+    
+   }
+   ```
+
+4. 在nacos添加seata的配置：
+
+   ```properties
+   # 数据存储方式，db代表数据库
+   store.mode=db
+   store.db.datasource=druid
+   store.db.dbType=mysql
+   store.db.driverClassName=com.mysql.cj.jdbc.Driver
+   store.db.url=jdbc:mysql://127.0.0.1:3306/seata?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+   store.db.user=root
+   store.db.password=12356
+   store.db.minConn=5
+   store.db.maxConn=30
+   store.db.globalTable=global_table
+   store.db.branchTable=branch_table
+   store.db.queryLimit=100
+   store.db.lockTable=lock_table
+   store.db.maxWait=5000
+   # 事务、日志等配置
+   server.recovery.committingRetryPeriod=1000
+   server.recovery.asynCommittingRetryPeriod=1000
+   server.recovery.rollbackingRetryPeriod=1000
+   server.recovery.timeoutRetryPeriod=1000
+   server.maxCommitRetryTimeout=-1
+   server.maxRollbackRetryTimeout=-1
+   server.rollbackRetryTimeoutUnlockEnable=false
+   server.undo.logSaveDays=7
+   server.undo.logDeletePeriod=86400000
+   
+   # 客户端与服务端传输方式
+   transport.serialization=seata
+   transport.compressor=none
+   # 关闭metrics功能，提高性能
+   metrics.enabled=false
+   metrics.registryType=compact
+   metrics.exporterList=prometheus
+   metrics.exporterPrometheusPort=9898	
+   ```
+
+   ![image](https://user-images.githubusercontent.com/48977889/170190239-def96e0f-200c-4383-aaa0-d446cea41645.png)
+
+5. 创建TC的数据库seata库，导入以下ddl：
+
+   ```mysql
+   SET NAMES utf8mb4;
+   SET FOREIGN_KEY_CHECKS = 0;
+   
+   -- ----------------------------
+   -- 分支事务表
+   -- ----------------------------
+   DROP TABLE IF EXISTS `branch_table`;
+   CREATE TABLE `branch_table`  (
+     `branch_id` bigint(20) NOT NULL,
+     `xid` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+     `transaction_id` bigint(20) NULL DEFAULT NULL,
+     `resource_group_id` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `resource_id` varchar(256) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `branch_type` varchar(8) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `status` tinyint(4) NULL DEFAULT NULL,
+     `client_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `application_data` varchar(2000) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `gmt_create` datetime(6) NULL DEFAULT NULL,
+     `gmt_modified` datetime(6) NULL DEFAULT NULL,
+     PRIMARY KEY (`branch_id`) USING BTREE,
+     INDEX `idx_xid`(`xid`) USING BTREE
+   ) ENGINE = InnoDB CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Compact;
+   
+   -- ----------------------------
+   -- 全局事务表
+   -- ----------------------------
+   DROP TABLE IF EXISTS `global_table`;
+   CREATE TABLE `global_table`  (
+     `xid` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+     `transaction_id` bigint(20) NULL DEFAULT NULL,
+     `status` tinyint(4) NOT NULL,
+     `application_id` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `transaction_service_group` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `transaction_name` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `timeout` int(11) NULL DEFAULT NULL,
+     `begin_time` bigint(20) NULL DEFAULT NULL,
+     `application_data` varchar(2000) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `gmt_create` datetime NULL DEFAULT NULL,
+     `gmt_modified` datetime NULL DEFAULT NULL,
+     PRIMARY KEY (`xid`) USING BTREE,
+     INDEX `idx_gmt_modified_status`(`gmt_modified`, `status`) USING BTREE,
+     INDEX `idx_transaction_id`(`transaction_id`) USING BTREE
+   ) ENGINE = InnoDB CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Compact;
+   
+   SET FOREIGN_KEY_CHECKS = 1;
+   ```
+
+6. 启动Seata：
+
+   
+
+微服务集成Seata：
+
+1. 微服务引入依赖：
+2. 添加配置：
