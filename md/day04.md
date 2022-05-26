@@ -627,3 +627,14 @@ Account：
 05-26 13:29:04:569  INFO 12490 --- [h_RMROLE_1_5_16] io.seata.rm.AbstractRMHandler            : Branch Rollbacked result: PhaseTwo_Rollbacked
 ```
 
+## 48-AT模式
+
+
+
+AT模式在事务提交后、TC确认前会有一个临时的软状态，此时对软状态会有脏读和脏写问题。
+
+XA和AT虽然都有互斥性，但AT的互斥粒度更小一点，XA是DB的行锁。AT也是行锁，叫全局锁，不过只是Seata层面维护的行锁，并且只限定Seata事务对该行的读写操作，DB锁是针对所有事务对该行的读写操作，在互斥粒度上，AT很明显比XA要小。
+
+不可避免的脏写问题：没有被Seata管理是事务操作了写，结果Seata回滚了undo数据。
+
+不可避免的脏读问题：这个确实无法避免。
