@@ -33,7 +33,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>1.8</java.version>
         <spring-cloud.version>Hoxton.SR8</spring-cloud.version>
-        <mysql.version>8.0.29</mysql.version>
+        <mysql.version>8.0.11</mysql.version>
         <mybatis.version>2.1.1</mybatis.version>
         <mybatis.plus.version>3.3.0</mybatis.plus.version>
         <seata.version>1.4.2</seata.version>

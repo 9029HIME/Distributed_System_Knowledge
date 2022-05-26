@@ -4,6 +4,6 @@ Content-Type: application/json
 {
   "userId": "user202103032042012",
   "commodityCode": "100202003032041",
-  "count": "100",
+  "count": "10",
   "money": "200"
 }

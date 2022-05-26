@@ -262,14 +262,6 @@ Eventually Consistent：最终一致性，在软状态结束后，集群内的�
 2. TM：即Transaction Manager事务管理者，用来定义全局事务的范围，划分子事务有哪些，向TC**提交全局事务的开启行为**。
 3. RM：即Resource Manager资源管理器，管理分支事务的开始，向TC报告分支事务的状态。
 
-三大角色的流程：
-
-1. 开始全局事务，TM向TC注册全局事务，注册行为会通知全局事务的范围，子事务的标识与数量。
-2. RM代理子事务的执行流程，向TC注册当前子事务，**并声明属于哪个全局事务**。
-3. RM执行子事务流程，向TC报告子事务的结果。
-4. TM发现所有子事务都**调用完毕（非执行完毕）**，向TC提交全局事务。
-5. TC等待所有子事务的执行结果，**根据子执行结果决定下一步操作**。
-
 ## 43-Seata四种分布式事务解决方案：
 
 知识点42可以看到，Seata会根据子事务结果做进一步操作，那么这个进一步操作到底是什么呢？根据对Seata的配置有以下解决方案：
@@ -475,3 +467,163 @@ Eventually Consistent：最终一致性，在软状态结束后，集群内的�
 3. 启动微服务后，可以看到Seata日志显示有服务接入：
 
    ​	![image](https://user-images.githubusercontent.com/48977889/170268340-0a5e052d-a439-497c-8a3b-c735b1e1a84f.png)
+
+# Seata使用
+
+## 46-XA模式
+
+XA规范是一套分布式事务处理标准，基于所有主流数据库都提供了XA规范的支持。
+
+![image](https://user-images.githubusercontent.com/48977889/170418207-bb9c4c39-bfad-43eb-9959-328720891c57.png)
+
+XA规范主要分为两个阶段
+
+第一阶段：
+
+1. TC告诉RM执行子事务。
+2. RM向TC反馈事务执行结果。
+
+第二阶段：
+
+1. TC判断各个RM的子事务结果，看看是否有失败。
+2. 告诉RM下一步该走什么，如果子事务都成功，就让RM都提交自己的事务。如果有1个子事务失败，就让RM都回滚自己的事务。
+
+Seata对XA的实现，实际上做了一层封装：
+
+![image](https://user-images.githubusercontent.com/48977889/170419251-6c8182ca-8795-4007-86d6-1c64ea285ea7.png)
+
+1. TM向TC注册全局事务，告诉TC自己有都少个子事务。
+2. TM负责发起微服务之间的请求，RM**拦截并代理**这个请求，向TC注册子事务。
+3. RM执行数据库事务，执行完成后不执行提交，而是向TC报告事务结果。
+4. TM发现自己的RM都结束完成了，向TC报告子事务都执行完毕。
+5. TC检查各个子事务状态，决定微服务们执行提交还是回滚。
+
+XA模式的优缺点：
+
+起码很多数据库本身就支持XA规范，开放了对应的接口给语言调用。不过要依赖数据库提供的实现，虽然所以没有代码侵入，但有一定的局限性。比如强一致性导致子事务之间都在等待，从而变成弱可用状态；比如不支持没有XA规范的数据库使用。
+
+## 47-XA模式的使用
+
+基于知识点46，已经了解了XA模式的流程和优缺点，接下来就是使用Seata来实现XA模式的事务处理。
+
+1. 修改**参与分布式事务**的服务实例的配置文件，声明Seata使用XA模式：
+
+   ```yaml
+   seata:
+     data-source-proxy-mode: XA
+   ```
+
+2. 全局事务的入口加上@GlobalTransactional注解：
+
+   对于知识点36的案例来说，全局事务入口就是public Long create(Order order)方法：
+
+   ```java
+   @Override
+   @GlobalTransactional
+   public Long create(Order order) {
+       // 创建订单
+       orderMapper.insert(order);
+       try {
+           // 扣用户余额
+           accountClient.deduct(order.getUserId(), order.getMoney());
+           // 扣库存
+           storageClient.deduct(order.getCommodityCode(), order.getCount());
+   
+       } catch (FeignException e) {
+           log.error("下单失败，原因:{}", e.contentUTF8(), e);
+           throw new RuntimeException(e.contentUTF8(), e);
+       }
+       return order.getId();
+   }
+   ```
+
+   **被标记这个注解的方法就是TM，在Feign调用到下游时会传入1个XID，下游服务在调用@Transactional方法时会将XID作为子事务的凭证，注册进TC。**
+
+3. 启动Nacos、Seata、3个服务实例，先跑一次正常的：
+
+   ```http
+   POST localhost:8082/order/createOrder
+   Content-Type: application/json
+   
+   {
+     "userId": "user202103032042012",
+     "commodityCode": "100202003032041",
+     "count": "2",
+     "money": "200"
+   }
+   ```
+
+   结果是正常的：
+
+   
+
+![image](https://user-images.githubusercontent.com/48977889/169955340-9200d7f4-6f95-40ae-a39c-e4bfa04c36f8.png)
+
+![image](https://user-images.githubusercontent.com/48977889/169955360-4148e831-edd8-4deb-bff9-070c93b70adf.png)
+
+![image](https://user-images.githubusercontent.com/48977889/169955381-dde06a62-2e9a-406b-a003-714cb86ba42b.png)
+
+4. 再跑一个异常、会报库存数不足的：
+
+```http
+POST localhost:8082/order/createOrder
+Content-Type: application/json
+
+{
+  "userId": "user202103032042012",
+  "commodityCode": "100202003032041",
+  "count": "10",
+  "money": "200"
+}
+
+###
+
+http://localhost:8082/order/createOrder
+
+HTTP/1.1 500 
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Thu, 26 May 2022 05:29:04 GMT
+Connection: close
+
+{
+  "timestamp": "2022-05-26T05:29:04.614+00:00",
+  "status": 500,
+  "error": "Internal Server Error",
+  "message": "",
+  "path": "/order/createOrder"
+}
+Response file saved.
+> 2022-05-26T132904.500.json
+
+Response code: 500; Time: 214ms; Content length: 131 bytes
+```
+
+​	此时会发现数据库的数据没有变，不会出现知识点38那样的结果，说明三个表都进行回滚了。而且在应用日志上也能看到回滚的信息：
+
+Order：
+
+```java
+05-26 13:29:04:576  INFO 12593 --- [h_RMROLE_1_4_16] i.s.c.r.p.c.RmBranchRollbackProcessor    : rm handle branch rollback process:xid=172.17.0.1:8091:8421997982558396444,branchId=8421997982558396446,branchType=XA,resourceId=jdbc:mysql://localhost:3306/seata_demo,applicationData=null
+05-26 13:29:04:576  INFO 12593 --- [h_RMROLE_1_4_16] io.seata.rm.AbstractRMHandler            : Branch Rollbacking: 172.17.0.1:8091:8421997982558396444 8421997982558396446 jdbc:mysql://localhost:3306/seata_demo
+05-26 13:29:04:580  INFO 12593 --- [h_RMROLE_1_4_16] i.s.rm.datasource.xa.ResourceManagerXA   : 172.17.0.1:8091:8421997982558396444-8421997982558396446 was rollbacked
+05-26 13:29:04:581  INFO 12593 --- [h_RMROLE_1_4_16] io.seata.rm.AbstractRMHandler            : Branch Rollbacked result: PhaseTwo_Rollbacked
+05-26 13:29:04:605  INFO 12593 --- [nio-8082-exec-6] i.seata.tm.api.DefaultGlobalTransaction  : Suspending current transaction, xid = 172.17.0.1:8091:8421997982558396444
+05-26 13:29:04:606  INFO 12593 --- [nio-8082-exec-6] i.seata.tm.api.DefaultGlobalTransaction  : [172.17.0.1:8091:8421997982558396444] rollback status: Rollbacked
+05-26 13:29:04:609 ERROR 12593 --- [nio-8082-exec-6] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed; nested exception is java.lang.RuntimeException: {"timestamp":"2022-05-26T05:29:04.535+00:00","status":500,"error":"Internal Server Error","message":"","path":"/storage/100202003032041/10"}] with root cause
+
+feign.FeignException$InternalServerError: [500] during [PUT] to [http://seata-storage-service/storage/100202003032041/10] [StorageClient#deduct(String,Integer)]: [{"timestamp":"2022-05-26T05:29:04.535+00:00","status":500,"error":"Internal Server Error","message":"","path":"/storage/100202003032041/10"}]
+```
+
+Account：
+
+```java
+05-26 13:29:04:461 DEBUG 12490 --- [nio-8083-exec-5] c.i.account.mapper.AccountMapper.deduct  : ==>  Preparing: update account_tbl set money = money - 200 where user_id = ?
+05-26 13:29:04:462 DEBUG 12490 --- [nio-8083-exec-5] c.i.account.mapper.AccountMapper.deduct  : ==> Parameters: user202103032042012(String)
+05-26 13:29:04:464 DEBUG 12490 --- [nio-8083-exec-5] c.i.account.mapper.AccountMapper.deduct  : <==    Updates: 1
+05-26 13:29:04:563  INFO 12490 --- [h_RMROLE_1_5_16] i.s.c.r.p.c.RmBranchRollbackProcessor    : rm handle branch rollback process:xid=172.17.0.1:8091:8421997982558396444,branchId=8421997982558396448,branchType=XA,resourceId=jdbc:mysql://localhost:3306/seata_demo,applicationData=null
+05-26 13:29:04:563  INFO 12490 --- [h_RMROLE_1_5_16] io.seata.rm.AbstractRMHandler            : Branch Rollbacking: 172.17.0.1:8091:8421997982558396444 8421997982558396448 jdbc:mysql://localhost:3306/seata_demo
+05-26 13:29:04:567  INFO 12490 --- [h_RMROLE_1_5_16] i.s.rm.datasource.xa.ResourceManagerXA   : 172.17.0.1:8091:8421997982558396444-8421997982558396448 was rollbacked
+05-26 13:29:04:569  INFO 12490 --- [h_RMROLE_1_5_16] io.seata.rm.AbstractRMHandler            : Branch Rollbacked result: PhaseTwo_Rollbacked
+```
+
