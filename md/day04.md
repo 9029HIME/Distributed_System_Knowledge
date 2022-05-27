@@ -675,10 +675,129 @@ Account：
 9. 不过好在Seata对全局锁的等待是有timeout的，默认是30次，每次10ms，也就是说事务2正在300ms后会释放**事务锁**，直接失败回滚。
 10. 此时事务1就能重新获取**事务锁**，执行恢复快照数据的事务了。
 
-总的来说，AT也是通过互斥性来防止脏写的发生，XA和AT虽然都有互斥性，但AT的互斥粒度更小一点，XA是DB的行锁。AT是全局锁，不过只是Seata层面维护的行锁，并且只限定**Seata事务对该行的读写操作**，DB锁是针对所有事务对该行的读写操作，其他不归Seata管的事务还是可以进行“脏写”的，在互斥粒度上，AT很明显比XA要小。
+总的来说，AT也是通过互斥性来防止脏写的发生，XA和AT虽然都有互斥性，但AT的互斥粒度更小一点，XA是DB的行锁。AT是全局锁，不过只是Seata层面维护的行锁，并且只限定**Seata事务对该行的读写操作**，DB锁是针对所有事务对该行的读写操作，**其他不归Seata管的事务还是可以进行“脏写”的**，在互斥粒度上，AT很明显比XA要小。 
 
-**但是！！！！如果事务2又进行了回滚，又要执行恢复快照数据为90了，那事务1不是白回滚了？**
+### AT脏读
 
-不可避免的脏写问题：没有被Seata管理是事务操作了写，结果Seata回滚了undo数据。
+和AT脏写差不多，当事务1提交事务后（数据库层面），事务1回滚之前（分布式事务层面）。事务2拿到事务1提交的结果进行判断，此时这个结果在数据库眼里是干净的，但在业务流程上已经变脏了。
 
-不可避免的脏读问题：这个确实无法避免。
+同样地，AT的读隔离也是通过全局锁判断，不过也是有2个前提：事务2必须是Seata管理的事务，并且读语句必须是select for update。事务2在操作select for update语句时，会检查select的行是否被全局锁占用了，如果是则回滚本地事务，通过 while 循环不断地重新竞争获取事务锁和全局锁。通过Seata源码可以判断，当**发现Seata管理的事务**执行select for update后，会走以下流程：
+
+io.seata.rm.datasource.exec.SelectForUpdateExecutor#doExecute
+
+```java
+public T doExecute(Object... args) throws Throwable {
+    Connection conn = statementProxy.getConnection();
+    // ... ...
+    try {
+        // ... ...
+        while (true) {
+            try {
+                // ... ...
+                if (RootContext.inGlobalTransaction() || RootContext.requireGlobalLock()) {
+                    // Do the same thing under either @GlobalTransactional or @GlobalLock, 
+                    // that only check the global lock  here.
+                    statementProxy.getConnectionProxy().checkLock(lockKeys);
+                } else {
+                    throw new RuntimeException("Unknown situation!");
+                }
+                break;
+            } catch (LockConflictException lce) {
+                if (sp != null) {
+                    conn.rollback(sp);
+                } else {
+                    conn.rollback();
+                }
+                // trigger retry
+                lockRetryController.sleep(lce);
+            }
+        }
+    } finally {
+        // ...
+    }
+```
+
+### AT优点
+
+可以直接提交，占用事务锁的时间少，高可用。
+
+### AT缺点
+
+有软状态，在软状态的情况下有可能会被其他事务脏写脏读，其他事务是Seata管理事务的话有可能引起脏回滚（如果事务2又进行了回滚，又要执行恢复快照数据为90了，那事务1不是白回滚了？），非Seata管理的事务有可能引起脏写脏读，对事务异常状态包容性不高，**需要在业务上尽量避免脏写脏读的发生**。
+
+## 49-AT使用
+
+1. 在TC的数据库导入全局锁ddl：
+
+   ```mysql
+   DROP TABLE IF EXISTS `lock_table`;
+   CREATE TABLE `lock_table`  (
+     `row_key` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+     `xid` varchar(96) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `transaction_id` bigint(20) NULL DEFAULT NULL,
+     `branch_id` bigint(20) NOT NULL,
+     `resource_id` varchar(256) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `table_name` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `pk` varchar(36) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `gmt_create` datetime NULL DEFAULT NULL,
+     `gmt_modified` datetime NULL DEFAULT NULL,
+     PRIMARY KEY (`row_key`) USING BTREE,
+     INDEX `idx_branch_id`(`branch_id`) USING BTREE
+   ) ENGINE = InnoDB CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Compact;
+   
+   
+   SET FOREIGN_KEY_CHECKS = 1;
+   ```
+
+2. 在参与分布式事务的服务实例的数据库导入unlog的ddl：
+
+   ```mysql
+   DROP TABLE IF EXISTS `undo_log`;
+   CREATE TABLE `undo_log`  (
+     `branch_id` bigint(20) NOT NULL COMMENT 'branch transaction id',
+     `xid` varchar(100) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'global transaction id',
+     `context` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'undo_log context,such as serialization',
+     `rollback_info` longblob NOT NULL COMMENT 'rollback info',
+     `log_status` int(11) NOT NULL COMMENT '0:normal status,1:defense status',
+     `log_created` datetime(6) NOT NULL COMMENT 'create datetime',
+     `log_modified` datetime(6) NOT NULL COMMENT 'modify datetime',
+     UNIQUE INDEX `ux_undo_log`(`xid`, `branch_id`) USING BTREE
+   ) ENGINE = InnoDB CHARACTER SET = utf8 COLLATE = utf8_general_ci COMMENT = 'AT transaction mode undo table' ROW_FORMAT = Compact;
+   ```
+
+3. 修改服务实例的配置文件，使用AT：
+
+   ```yaml
+   seata:
+     data-source-proxy-mode: AT
+   ```
+
+4. 使用和XA没区别，也是在全局事务入口加上@GlobalTransactionl注解，代码实例和知识点47一样
+
+5. 接下来尝试一下异常案例：
+
+```http
+POST localhost:8082/order/createOrder
+Content-Type: application/json
+
+{
+  "userId": "user202103032042012",
+  "commodityCode": "100202003032041",
+  "count": "10",
+  "money": "200"
+}
+```
+
+结果和知识点57一样。
+
+## 50-TCC模式
+
+
+
+空回滚和业务悬挂：
+
+空回滚：还没try，就被TC通知执行cancel了。
+
+业务悬挂：空回滚后才执行try，此时事务都完结了，try后的逻辑没人处理。
+
+并不是所有事务都适合TCC模式，无法避免脏读，Confirm和Cancel需要做好幂等。
