@@ -46,3 +46,10 @@ seata:
 #      password: nacos
 #      group: SEATA_GROUP
 #      data-id: client.properties
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeOut: 500000
+        readTimeOut: 500000

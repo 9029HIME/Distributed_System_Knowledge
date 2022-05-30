@@ -4,6 +4,7 @@ import cn.itcast.account.entity.AccountFreeze;
 import cn.itcast.account.mapper.AccountFreezeMapper;
 import cn.itcast.account.mapper.AccountMapper;
 import cn.itcast.account.service.AccountTCCService;
+import io.seata.spring.annotation.GlobalTransactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class AccountTCCServiceImpl implements AccountTCCService {
 
     @Override
     @Transactional
+    @GlobalTransactional
     public void deduct(String userId, int money) {
         // 0.获取事务id
 //        String xid = RootContext.getXID();

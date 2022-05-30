@@ -4,6 +4,9 @@ Content-Type: application/json
 {
   "userId": "user202103032042012",
   "commodityCode": "100202003032041",
-  "count": "10",
+  "count": "100",
   "money": "200"
 }
+
+###
+PUT localhost:8083/account/user202103032042012/400
