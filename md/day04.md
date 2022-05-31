@@ -834,6 +834,67 @@ Content-Type: application/json
 
 3. 说一下整体流程：正常启动订单服务、余额服务、debug启动库存服务。先跑一批库存不足的提交订单申请，此时流程会停留在断点Storage服务实例deduct方法的storageMapper.deduct(commodityCode, count);这一段。但是订单表已经生成订单、余额表已经扣减金额。对于订单服务和余额服务来说一阶段已经结束，事务已提交，这两张表的数据可以被其他事务读取到的。在流程仍在断点期间，访问订单服务的getOrder接口，获取一阶段提交、二阶段回滚前的订单信息，看看getOrder结果是怎么样的。**注意！！！getOrder这个操作本身是被Seata管理的事务，并且查询的时候用的是SELECT FOR UPDATE操作！！！**
 
+4. 运行测试用例，可以看到以下结果：
+
+   ```http
+   POST localhost:8082/order/createOrder
+   Content-Type: application/json
+   
+   {
+     "userId": "user202103032042012",
+     "commodityCode": "100202003032041",
+     "count": "100",
+     "money": "200"
+   }
+   ```
+
+   ![image](https://user-images.githubusercontent.com/48977889/171169146-f06b5053-7009-4664-8c70-5a4351627321.png)
+
+   ![image](https://user-images.githubusercontent.com/48977889/171168577-e55422d3-4cd1-46ee-8e50-67653ce761c7.png)
+
+   可以看到订单服务和余额服务的一阶段都执行完毕了，那这时候查询id=28的订单，会发生什么？
+
+   ```http
+   GET localhost:8082/order/getOrder?id=28
+   ```
+
+   ```java
+   05-31 20:05:57:876 ERROR 6236 --- [nio-8082-exec-5] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed; nested exception is org.springframework.dao.QueryTimeoutException: 
+   ### Error querying database.  Cause: io.seata.rm.datasource.exec.LockWaitTimeoutException: Global lock wait timeout
+   ### The error may exist in cn/itcast/order/mapper/OrderMapper.java (best guess)
+   ### The error may involve cn.itcast.order.mapper.OrderMapper.selectForUpdate-Inline
+   ### The error occurred while setting parameters
+   ### SQL: select * from order_tbl where id = ? for update
+   ### Cause: io.seata.rm.datasource.exec.LockWaitTimeoutException: Global lock wait timeout
+   ; Global lock wait timeout; nested exception is io.seata.rm.datasource.exec.LockWaitTimeoutException: Global lock wait timeout] with root cause
+   
+   ```
+
+   可以看到查询订单的事务应为拿不到全局锁，直接抛出异常，事务回滚。
+
+
+### 防脏写
+
+​		这次从读一阶段后的订单信息，改成写一阶段后的余额信息，也是走到断点处，并且触发这个用例：
+
+```http
+PUT localhost:8083/account/user202103032042012/400
+```
+
+```java
+05-31 20:21:49:703 ERROR 11558 --- [nio-8083-exec-2] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed; nested exception is org.springframework.transaction.TransactionSystemException: Could not commit JDBC transaction; nested exception is io.seata.rm.datasource.exec.LockConflictException: get global lock fail, xid:172.18.0.1:8091:6917797573132374212, lockKeys:account_tbl:1] with root cause
+
+io.seata.rm.datasource.exec.LockConflictException: get global lock fail, xid:172.18.0.1:8091:6917797573132374212, lockKeys:account_tbl:1
+```
+
+可以看到和脏写一样，也是因为获取不到全局锁而失败了。
+
+### 突发奇想，脏回滚呢？
+
+​	还是和防脏写一样，跑第一次用例流程走到断电处，1阶段已经结束。此时再跑相同的流程呢？会导致脏回滚嘛？
+
+​	**不会的，第二次事务的回滚不会覆盖第一次事务的回滚**，具体过程不演示了。
+
 ## 51-TCC模式
 
 **前言：TCC更考验编码逻辑和测试用例，代码侵入性很高，稍有不慎就会引发生产事故，因此谨慎使用。**
