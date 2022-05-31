@@ -792,7 +792,47 @@ Content-Type: application/json
 
 ## 50-AT的防脏读、防脏写演示
 
-// TODO
+### 防脏读
+
+1. 对Order服务实例添加以下代码：
+
+   ```java
+   @GetMapping("/getOrder")
+   public ResponseEntity<String> getOrder(@RequestParam("id") Long id){
+       Order order = orderService.getOrder(id);
+       return ResponseEntity.status(HttpStatus.CREATED).body(order.toString());
+   }
+   
+       @Override
+       @GlobalTransactional
+       @Transactional
+       public Order getOrder(Long id) {
+           Order order = orderMapper.selectForUpdate(id);
+           return order;
+       }
+   
+   
+       @Select("select * from order_tbl where id = #{id} for update")
+       Order selectForUpdate(@Param("id") Long id);
+   ```
+
+2. 在Storage服务实例的减库存接口打上断点storageMapper.deduct(commodityCode, count);：
+
+   ```java
+       @Transactional
+       @Override
+       public void deduct(String commodityCode, int count) {
+           log.info("开始扣减库存");
+           try {
+               storageMapper.deduct(commodityCode, count);
+           } catch (Exception e) {
+               throw new RuntimeException("扣减库存失败，可能是库存不足！", e);
+           }
+           log.info("扣减库存成功");
+       }
+   ```
+
+3. 说一下整体流程：正常启动订单服务、余额服务、debug启动库存服务。先跑一批库存不足的提交订单申请，此时流程会停留在断点Storage服务实例deduct方法的storageMapper.deduct(commodityCode, count);这一段。但是订单表已经生成订单、余额表已经扣减金额。对于订单服务和余额服务来说一阶段已经结束，事务已提交，这两张表的数据可以被其他事务读取到的。在流程仍在断点期间，访问订单服务的getOrder接口，获取一阶段提交、二阶段回滚前的订单信息，看看getOrder结果是怎么样的。**注意！！！getOrder这个操作本身是被Seata管理的事务，并且查询的时候用的是SELECT FOR UPDATE操作！！！**
 
 ## 51-TCC模式
 
