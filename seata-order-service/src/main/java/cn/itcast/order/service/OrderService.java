@@ -8,4 +8,6 @@ public interface OrderService {
      * 创建订单
      */
     Long create(Order order);
+
+    Order getOrder(Long id);
 }

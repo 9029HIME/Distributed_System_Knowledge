@@ -45,4 +45,12 @@ public class OrderServiceImpl implements OrderService {
         }
         return order.getId();
     }
+
+    @Override
+    @GlobalTransactional
+    @Transactional
+    public Order getOrder(Long id) {
+        Order order = orderMapper.selectForUpdate(id);
+        return order;
+    }
 }

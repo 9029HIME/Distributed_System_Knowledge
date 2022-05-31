@@ -796,7 +796,7 @@ Content-Type: application/json
 
 ## 51-TCC模式
 
-**前言：TCC更考验编码逻辑和测试用例，代码侵入性很高，稍有不慎就会引发生产事故，因此不太建议使用。**
+**前言：TCC更考验编码逻辑和测试用例，代码侵入性很高，稍有不慎就会引发生产事故，因此谨慎使用。**
 
 ![image](https://user-images.githubusercontent.com/48977889/170924972-8552598a-0265-4f9b-91d9-30cb7e715a00.png)
 
@@ -813,24 +813,128 @@ Content-Type: application/json
 就这样一个简单的TCC流程，实际涉及到很多场景的考虑，比如：
 
 1. 假如我在try阶段发生异常，或者注册了分支事务后，执行Try超时了。TC会让事务实例执行Cancel操作，那么Cancel恢复余额时要考虑资源预留信息表记录不存在的情况（允许空回滚）。
-2. 注册了分支事务后，执行Try超时了导致Cancel先执行。这时候要是Try恢复执行，就会导致执行了Try但不会执行Confirm或Cancel。那么在执行try的时候应该考虑是否Try过了（避免业务悬挂）。
-3. 执行Try后很正常，资源也预留成功了，
+2. 注册了分支事务后，执行Try超时了导致Cancel先执行。这时候要是Try恢复执行，就会导致执行了Try但不会执行Confirm或Cancel。那么在执行try的时候应该考虑**是否Cancel过了**（避免业务悬挂）。
+3. 执行Try后很正常，资源也预留成功了，但是在Confirm或者Cancel前，其他事务SELECT被预留的资源该怎么办？这时还处于软状态，有可能会得到脏数据。或者其他事务UPDATE了预留资源，这有涉及到脏读脏写问题了。可是TCC模式没有TA那样的全局锁、也不会像XA那样全程拿着事务锁。**在TCC模式下，只能通过业务代码判断预留资源表是否有要操作的、并且处于try阶段的数据，如果有要进行特殊处理，也就是说在数据的写隔离和读隔离依赖于自定义的代码，Seata不会帮我们做这件事。
+3. 总的来说，并不是所有事务都适合TCC模式，它只能通过代码人为控制资源预留信息表的方式防止脏读、脏写，对Try、Confirm、Cancel需要做好幂等处理。
 
-空回滚和业务悬挂：
+## 52-TCC模式的使用
 
-空回滚：还没try，就被TC通知执行cancel了。
+在知识点51的例子，仅针对Account服务实现TCC事务模式，Seata的分布式事务模式是细分到服务实例层面的，一个微服务的不同实例可以使用不同的分布式事务模式。
 
-业务悬挂：空回滚后才执行try，此时事务都完结了，try后的逻辑没人处理。
+1. 对于Try、Confirm、Cancel操作的类添加@LocalTCC注解。对Try操作添加@TwoPhaseBusinessAction注解，指定Confirm和Cancel的操作方法名：
 
-并不是所有事务都适合TCC模式，无法避免脏读，Confirm和Cancel需要做好幂等。
+   ```java
+   @LocalTCC
+   public interface AccountTCCService {
+   
+       @TwoPhaseBusinessAction(name = "deduct",commitMethod = "confirm",rollbackMethod = "cancel")
+       void deduct(@BusinessActionContextParameter(paramName = "userId") String userId,
+                   @BusinessActionContextParameter(paramName = "money") int money);
+   
+       boolean confirm(BusinessActionContext ctx);
+   
+       boolean cancel(BusinessActionContext ctx);
+   }
+   ```
 
-## 52-SAGA模式
+对于Confirm和Cancel操作来说，可以添加BusinessActionContext参数来获取Try-Confirm-Cancel过程中的公共数据，可以理解为上下文。而Try操作的参数可以添加@BusinessActionContextParameter()，方便上下文获取到。
+
+2. 引入资源预留信息表，在这个业务中是“冻结余额表”，每次**扣款后都往冻结余额表插入一条记录，并注明扣款状态、事务ID**，这一整个为Try操作：
+
+   ```mysql
+   DROP TABLE IF EXISTS `account_freeze_tbl`;
+   CREATE TABLE `account_freeze_tbl`  (
+     `xid` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+     `user_id` varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL,
+     `freeze_money` int(11) UNSIGNED NULL DEFAULT 0,
+     `state` int(1) NULL DEFAULT NULL COMMENT '事务状态，0:try，1:confirm，2:cancel',
+     PRIMARY KEY (`xid`) USING BTREE
+   ) ENGINE = InnoDB CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = COMPACT;
+   SET FOREIGN_KEY_CHECKS = 1;
+   ```
+
+3. 编写Try操作，注意业务悬挂：
+
+   ```java
+       @Override
+       @Transactional
+       @GlobalTransactional
+       public void deduct(String userId, int money) {
+           // 0.获取事务id
+           String xid = RootContext.getXID();
+           // 1 先看是否被空回滚了，如果是，就不要try了，防止业务悬挂。
+           AccountFreeze exist = freezeMapper.selectById(xid);
+           if (exist != null) {
+               return;
+           }
+           // 2.扣减可用余额
+           accountMapper.deduct(userId, money);
+           // 3.记录冻结金额，事务状态
+           AccountFreeze freeze = new AccountFreeze();
+           freeze.setUserId(userId);
+           freeze.setFreezeMoney(money);
+           freeze.setState(AccountFreeze.State.TRY);
+           freeze.setXid(xid);
+           freezeMapper.insert(freeze);
+       }
+   ```
+
+4. 编写Confirm操作，提交成功后直接删除资源预留表的记录：
+
+   ```java
+   @Override
+   public boolean confirm(BusinessActionContext ctx) {
+       // 1.获取事务id
+       String xid = ctx.getXid();
+       // 2.根据id删除冻结记录
+       int count = freezeMapper.deleteById(xid);
+       return count == 1;
+   }
+   ```
+
+5. 编写Cancel操作，注意要考虑还没执行Try就Cancel了：
+
+   ```java
+   @Override
+   public boolean cancel(BusinessActionContext ctx) {
+       // 0.查询冻结记录
+       String xid = ctx.getXid();
+       AccountFreeze freeze = freezeMapper.selectById(xid);
+       // 1.是否还没Try就Cancel了？如果是代表本次是空回滚，需要插入一条Cancel的记录
+       if (freeze == null) {
+           // 获取Try阶段的参数
+           String userId = ctx.getActionContext("userId").toString();
+           freeze = new AccountFreeze();
+           freeze.setXid(xid);
+           freeze.setState(AccountFreeze.State.CANCEL);
+           freeze.setFreezeMoney(0);
+           freeze.setUserId(userId);
+           freezeMapper.insert(freeze);
+           return true;
+       }
+       // 2.恢复可用余额
+       accountMapper.refund(freeze.getUserId(), freeze.getFreezeMoney());
+       // 3.将冻结金额清零，状态改为CANCEL
+       freeze.setFreezeMoney(0);
+       freeze.setState(AccountFreeze.State.CANCEL);
+       int count = freezeMapper.updateById(freeze);
+       return count == 1;
+   }
+   ```
+
+6. 启动项目后，跑知识点37和知识点38的用例，测试没问题，还能看到资源预留信息表有CANCEL记录：
+
+   ![image](https://user-images.githubusercontent.com/48977889/171099292-de902916-ff62-4439-99a6-75bc8f3f314e.png)
+
+   
+
+## 53-SAGA模式
 
 以全局事务为入口按序执行子事务，一旦发现子事务异常回滚，则前面的子事务倒叙回滚。这种分布式事务模式既没有全局锁，也没有资源冻结，采用长事务的解决办法。**但是软状态太长了，没有隔离性页导致无法避免脏写和脏读，只适用于旧系统添加分布式事务功能**。
 
 ![image](https://user-images.githubusercontent.com/48977889/170922614-46e244d4-25eb-4cb1-9e94-8dfec9cabe6f.png)
 
-## 53-4种模式对比
+## 54-4种模式对比
 
 ![image](https://user-images.githubusercontent.com/48977889/170923018-8fc2ee37-ed67-437c-b504-bacaa429fcd4.png)
 
