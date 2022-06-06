@@ -105,4 +105,132 @@ appendfsync 策略值
 
 # Redis主从集群
 
-先给我的Ubuntu01和Ubuntu02安装好redis
+先给我的Ubuntu01和Ubuntu02安装好Redis，值得注意的是，在这个知识点下的Redis主从集群只是为了解决海量请求的并发能力（写Master，读Replica），但不能解决存储能力问题，数据的存储并没有分片和备份，每个节点上的信息都是一致的（不像Es和Kafka）。
+
+## 60-1主2从集群搭建
+
+1. 关闭AOF，开启ADB模式。
+
+2. 在redis配置文件里声明自己的ip地址，三台机子都要，这里以master为例：
+
+   ![image](https://user-images.githubusercontent.com/48977889/172096489-eb411eae-b939-42aa-8a48-ae69e4b33230.png)
+
+3. 在从节点的配置上添加replicaof ${主机ip} ${端口}的配置。
+
+4. 在主节点配置文件上修改bind为 bind 0.0.0.0，表示只允许这两个ip的节点称为自己的子节点。
+
+5. 启动主节点，然后依次启动子节点，可以看到主节点的日志信息：
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-server /usr/local/redis/redis-6.2.4/redis.conf
+   9786:C 06 Jun 2022 13:05:25.336 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+   9786:C 06 Jun 2022 13:05:25.336 # Redis version=6.2.4, bits=64, commit=00000000, modified=0, pid=9786, just started
+   9786:C 06 Jun 2022 13:05:25.336 # Configuration loaded
+   9786:M 06 Jun 2022 13:05:25.338 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+   9786:M 06 Jun 2022 13:05:25.338 * monotonic clock: POSIX clock_gettime
+                   _._                                                  
+              _.-``__ ''-._                                             
+         _.-``    `.  `_.  ''-._           Redis 6.2.4 (00000000/0) 64 bit
+     .-`` .-```.  ```\/    _.,_ ''-._                                  
+    (    '      ,       .-`  | `,    )     Running in standalone mode
+    |`-._`-...-` __...-.``-._|'` _.-'|     Port: 6379
+    |    `-._   `._    /     _.-'    |     PID: 9786
+     `-._    `-._  `-./  _.-'    _.-'                                   
+    |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+    |    `-._`-._        _.-'_.-'    |           https://redis.io       
+     `-._    `-._`-.__.-'_.-'    _.-'                                   
+    |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+    |    `-._`-._        _.-'_.-'    |                                  
+     `-._    `-._`-.__.-'_.-'    _.-'                                   
+         `-._    `-.__.-'    _.-'                                       
+             `-._        _.-'                                           
+                 `-.__.-'                                               
+   
+   9786:M 06 Jun 2022 13:05:25.340 # Server initialized
+   9786:M 06 Jun 2022 13:05:25.340 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+   9786:M 06 Jun 2022 13:05:25.341 * Loading RDB produced by version 6.2.4
+   9786:M 06 Jun 2022 13:05:25.341 * RDB age 2 seconds
+   9786:M 06 Jun 2022 13:05:25.341 * RDB memory usage when created 0.77 Mb
+   9786:M 06 Jun 2022 13:05:25.341 * DB loaded from disk: 0.000 seconds
+   9786:M 06 Jun 2022 13:05:25.341 * Ready to accept connections
+   9786:M 06 Jun 2022 13:05:51.754 * Replica 192.168.120.121:6379 asks for synchronization
+   9786:M 06 Jun 2022 13:05:51.754 * Partial resynchronization not accepted: Replication ID mismatch (Replica asked for '278c509688bfd003b2b7f89f0c4b192aa691cc84', my replication IDs are '732e949266ba35794e4cb90ac23c96a480559491' and '0000000000000000000000000000000000000000')
+   9786:M 06 Jun 2022 13:05:51.754 * Replication backlog created, my new replication IDs are '840015749c430ae7a7e62b35f45e35bae5650731' and '0000000000000000000000000000000000000000'
+   9786:M 06 Jun 2022 13:05:51.754 * Starting BGSAVE for SYNC with target: disk
+   9786:M 06 Jun 2022 13:05:51.755 * Background saving started by pid 9944
+   9944:C 06 Jun 2022 13:05:51.760 * DB saved on disk
+   9944:C 06 Jun 2022 13:05:51.761 * RDB: 0 MB of memory used by copy-on-write
+   9786:M 06 Jun 2022 13:05:51.777 * Background saving terminated with success
+   9786:M 06 Jun 2022 13:05:51.778 * Synchronization with replica 192.168.120.121:6379 succeeded
+   9786:M 06 Jun 2022 13:06:32.097 * Replica 192.168.120.122:6379 asks for synchronization
+   9786:M 06 Jun 2022 13:06:32.098 * Full resync requested by replica 192.168.120.122:6379
+   9786:M 06 Jun 2022 13:06:32.098 * Starting BGSAVE for SYNC with target: disk
+   9786:M 06 Jun 2022 13:06:32.102 * Background saving started by pid 10018
+   10018:C 06 Jun 2022 13:06:32.111 * DB saved on disk
+   10018:C 06 Jun 2022 13:06:32.112 * RDB: 0 MB of memory used by copy-on-write
+   9786:M 06 Jun 2022 13:06:32.181 * Background saving terminated with success
+   9786:M 06 Jun 2022 13:06:32.181 * Synchronization with replica 192.168.120.122:6379 succeeded
+   ```
+
+6. 此时在主节点通过redis客户端命令可以看到整个集群的信息：
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli 
+   127.0.0.1:6379> info replication
+   # Replication
+   role:master
+   connected_slaves:2
+   slave0:ip=192.168.120.121,port=6379,state=online,offset=252,lag=1
+   slave1:ip=192.168.120.122,port=6379,state=online,offset=252,lag=1
+   master_failover_state:no-failover
+   master_replid:840015749c430ae7a7e62b35f45e35bae5650731
+   master_replid2:0000000000000000000000000000000000000000
+   master_repl_offset:252
+   second_repl_offset:-1
+   repl_backlog_active:1
+   repl_backlog_size:1048576
+   repl_backlog_first_byte_offset:1
+   repl_backlog_histlen:252
+   127.0.0.1:6379> 
+   ```
+
+7. 如果在子节点进行写操作时，会发现抛出异常，可以看到redis主从集群里，主节点用来写，子节点只能用来读：
+
+   ```bash
+   kjg1@ubuntu01:/usr/local/redis/redis-6.2.4$ redis-cli 
+   127.0.0.1:6379> set num 123
+   (error) READONLY You can't write against a read only replica.
+   127.0.0.1:6379> 
+   ```
+
+## 61-主从集群同步过程
+
+![image](https://user-images.githubusercontent.com/48977889/172101088-7e018176-c734-4c2c-9e2a-8a517b328345.png)
+
+值得注意的是：
+
+0. 每一个redis节点都有自己的replid（唯一）和offset，当子节点连接主节点时，需要将自己的replid和offset传过去。
+
+1. 子节点第一次连接主节点，采用全量同步。后续的数据采用增量同步，增量同步是通过master的子进程将repl_baklog的**命令**发送到对应的子节点，子节点依次执行命令以达到数据同步的效果。主节点通过子节点连接时带过来的replid判断是不是自己的子节点，如果不是则走全量同步流程（第一、第二阶段）。如果是，则看子节点的offset和自己的offset差多少，并将数据增量同步过去（第三阶段）。
+
+2. 当然，连接成功后，后续的信息同步也是基于增量同步的，包括子节点重启后再次连接master（在第一阶段子节点已经将主节点的replid保存下来了）。
+
+3. repl_baklog本质是一个环形队列缓冲区，主节点写满后会从头开始覆盖数据，一旦子节点宕机太久或者太久没向主节点拿数据，有可能导致这个子节点offset之后的数据被主节点覆盖掉了，这时候就无法做增量同步了，只能重新做一次全量同步：
+
+   正常情况（能做增量）：
+
+   ![image](https://user-images.githubusercontent.com/48977889/172103055-2b955847-59ff-4c45-a6dc-2a1c748cc30c.png)
+
+   数据被覆盖情况（只能做全量）：
+
+   ![image](https://user-images.githubusercontent.com/48977889/172103091-3f887eda-c924-402a-9b58-51feb01d110c.png)
+
+## 62-主从集群的优化
+
+1. 在主节点配置文件内加上repl-diskless-sync yes，表示无磁盘复制。在进行第一次全量同步的时候RDB文件不会在磁盘生成，而是直接写到网络缓冲区发送给从节点，这种实用于弱磁盘、高带宽的主节点。**属于针对全量同步的优化**
+
+2. 适当提高repl_baklog的大小，发现子节点宕机后尽快恢复子节点。**属于尽量避免全量同步的优化**
+
+3. 限制1个主节点的从节点数量，如果实在太多子节点，可以采用主-从-从的架构，二级从节点也是采用replicaof配置连接一级从节点，不过低级从节点的弱一致性的概率会变高。**属于减轻主节点的同步压力的优化**
+
+   ![image](https://user-images.githubusercontent.com/48977889/172103975-09d79da3-2c32-4734-b9b0-aded3a87a316.png)
