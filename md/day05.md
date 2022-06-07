@@ -268,6 +268,19 @@ appendfsync 策略值
 
 这里在Ubuntu02搭建一个哨兵集群，一台机子开启3个哨兵实例：
 
-1. 首先新建三个哨兵的配置文件：
+1. 首先新建三个哨兵的配置文件目录 s1 s2 s3
 
-   
+2. 分别在对应目录下新建哨兵的配置文件sentinel.conf
+
+   ```
+   port 27001	#哨兵实例所在端口
+   sentinel announce-ip 192.168.120.121 #哨兵实例所在ip
+   sentinel monitor mymaster 192.168.120.161 6379 2 #指定redis集群的master所在地址，mymaster代表自定义的master名称，最后这个2代表quorum
+   sentinel down-after-milliseconds mymaster 5000 
+   sentinel failover-timeout mymaster 60000
+   dir "/home/kjg1/s1"	#哨兵的工作目录
+   ```
+
+   当然，s2和s3的哨兵配置文件略微不同，改改端口和工作目录就好了。
+
+3. 执行redis-sentinel ${配置文件路径}命令，开启3个哨兵实例
