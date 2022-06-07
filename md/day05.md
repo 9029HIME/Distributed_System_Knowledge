@@ -234,3 +234,40 @@ appendfsync 策略值
 3. 限制1个主节点的从节点数量，如果实在太多子节点，可以采用主-从-从的架构，二级从节点也是采用replicaof配置连接一级从节点，不过低级从节点的弱一致性的概率会变高。**属于减轻主节点的同步压力的优化**
 
    ![image](https://user-images.githubusercontent.com/48977889/172103975-09d79da3-2c32-4734-b9b0-aded3a87a316.png)
+
+# Redis哨兵
+
+哨兵Sentinel是Redis提供的一个监控实例，这里的Sentinel和知识点25的Sentinel不是同一个东西。Redis哨兵主要提供了监控集群健康状态、故障转移、订阅发布集群信息的功能。利用心跳机制监控集群状态，排查出故障的Master，再通过故障转移从Slave中选出一个新Master，维护集群的高可用性。当然，这时候集群节点发生了变更，Redis哨兵也会通过订阅发布机制告诉Redis客户端哪些是Master，哪些是Slave。
+
+## 63-哨兵监控
+
+哨兵是基于心跳机制监控Redis集群中节点的状态，每隔1秒向**每个节点**发送ping命令（Redis的ping pong），如果某个哨兵发现某个节点未在**规定时间内**响应pong，就认为这个节点**主观下线**。
+
+当超过quorum个哨兵都认为这个节点主观下线，那么这个节点就变成**客观下线**。当Master客观下线后，哨兵开启故障转移功能。quorum值最好超过哨兵数的一半（类似Zookeeper的不可用依据）。
+
+![image](https://user-images.githubusercontent.com/48977889/172303270-063970ec-64bc-4831-ad12-59fc151ec4ed.png)
+
+## 64-哨兵故障恢复
+
+哨兵需要选一个Slave来当新Master，那改选谁呢？其实哨兵有自己的一套规范，优先级如下：
+
+1. 判断Slave与Master的断连时长，如果超过(down-after-milliseconds * 10)，则排除该Slave。
+2. 判断Slave的slave-priority值，越小优先级越高，为0表示不参选Master，默认所有节点是一样的，所以默认情况下这个值不作为依据。
+3. 如果slave-priority值一致，则判断Slave的offset值，值越大优先级越高（数据越新）。
+4. 如果offset值也一样，则判断Slave的run id大小，越小优先级越高，这个其实不重要，offset才是最主要的。
+
+当选好新Master后，故障转移的步骤如下：
+
+1. 给新Master执行replicaof no one指令，表示该节点不再是Slave了。
+2. 给其他Slave执行replica of ${新Master IP} ${新Master Port}指令，表示称为新Master的Slave。此时其他节点就会与新Master开启**增量同步**。
+3. 当旧Master恢复后，哨兵会将旧Master的配置文件改为replica of ${新Master IP} ${新Master Port}，使其成为Slave。
+
+## 65-哨兵集群的搭建
+
+哨兵集群的搭建倒是没那么麻烦，只要多个哨兵都监控同一个集群的主节点，这些哨兵就会自动维护成一个哨兵集群。
+
+这里在Ubuntu02搭建一个哨兵集群，一台机子开启3个哨兵实例：
+
+1. 首先新建三个哨兵的配置文件：
+
+   
