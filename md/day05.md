@@ -266,7 +266,7 @@ appendfsync 策略值
 
 哨兵集群的搭建倒是没那么麻烦，只要多个哨兵都监控同一个集群的主节点，这些哨兵就会自动维护成一个哨兵集群。
 
-这里在Ubuntu02搭建一个哨兵集群，一台机子开启3个哨兵实例：
+这里在Ubuntu01搭建一个哨兵集群，一台机子开启3个哨兵实例：
 
 1. 首先新建三个哨兵的配置文件目录 s1 s2 s3
 
@@ -277,10 +277,236 @@ appendfsync 策略值
    sentinel announce-ip 192.168.120.121 #哨兵实例所在ip
    sentinel monitor mymaster 192.168.120.161 6379 2 #指定redis集群的master所在地址，mymaster代表自定义的master名称，最后这个2代表quorum
    sentinel down-after-milliseconds mymaster 5000 
-   sentinel failover-timeout mymaster 60000
+   sentinel failover-timeout mymaster 60000 #故障恢复的超时时间
    dir "/home/kjg1/s1"	#哨兵的工作目录
    ```
 
    当然，s2和s3的哨兵配置文件略微不同，改改端口和工作目录就好了。
 
-3. 执行redis-sentinel ${配置文件路径}命令，开启3个哨兵实例
+3. 启动知识点60搭建好的Redis主从集群。
+
+3. 在Ubuntu01执行redis-sentinel ${配置文件路径}命令，开启3个哨兵实例
+
+```bash
+kjg1@ubuntu01:~$ redis-sentinel s1/sentinel.conf 
+2275:X 08 Jun 2022 12:49:18.520 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+2275:X 08 Jun 2022 12:49:18.520 # Redis version=6.2.4, bits=64, commit=00000000, modified=0, pid=2275, just started
+2275:X 08 Jun 2022 12:49:18.520 # Configuration loaded
+2275:X 08 Jun 2022 12:49:18.522 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+2275:X 08 Jun 2022 12:49:18.522 * monotonic clock: POSIX clock_gettime
+                _._                                                  
+           _.-``__ ''-._                                             
+      _.-``    `.  `_.  ''-._           Redis 6.2.4 (00000000/0) 64 bit
+  .-`` .-```.  ```\/    _.,_ ''-._                                  
+ (    '      ,       .-`  | `,    )     Running in sentinel mode
+ |`-._`-...-` __...-.``-._|'` _.-'|     Port: 27001
+ |    `-._   `._    /     _.-'    |     PID: 2275
+  `-._    `-._  `-./  _.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |           https://redis.io       
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |                                  
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+      `-._    `-.__.-'    _.-'                                       
+          `-._        _.-'                                           
+              `-.__.-'                                               
+
+2275:X 08 Jun 2022 12:49:18.525 # Sentinel ID is cc261e005dab1ab299a306ac716ea970d649c01b
+2275:X 08 Jun 2022 12:49:18.525 # +monitor master mymaster 192.168.120.161 6379 quorum 2
+2275:X 08 Jun 2022 12:49:18.529 * +slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:49:18.534 * +slave slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:49:23.578 # +sdown slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+```
+
+```bash
+kjg1@ubuntu01:~$ redis-sentinel s2/sentinel.conf 
+2307:X 08 Jun 2022 12:50:45.149 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+2307:X 08 Jun 2022 12:50:45.149 # Redis version=6.2.4, bits=64, commit=00000000, modified=0, pid=2307, just started
+2307:X 08 Jun 2022 12:50:45.149 # Configuration loaded
+2307:X 08 Jun 2022 12:50:45.151 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+2307:X 08 Jun 2022 12:50:45.151 * monotonic clock: POSIX clock_gettime
+                _._                                                  
+           _.-``__ ''-._                                             
+      _.-``    `.  `_.  ''-._           Redis 6.2.4 (00000000/0) 64 bit
+  .-`` .-```.  ```\/    _.,_ ''-._                                  
+ (    '      ,       .-`  | `,    )     Running in sentinel mode
+ |`-._`-...-` __...-.``-._|'` _.-'|     Port: 27002
+ |    `-._   `._    /     _.-'    |     PID: 2307
+  `-._    `-._  `-./  _.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |           https://redis.io       
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |                                  
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+      `-._    `-.__.-'    _.-'                                       
+          `-._        _.-'                                           
+              `-.__.-'                                               
+
+2307:X 08 Jun 2022 12:50:45.158 # Sentinel ID is 635f34cf4fad025ed3014ab4db02cc27efc1a10a
+2307:X 08 Jun 2022 12:50:45.158 # +monitor master mymaster 192.168.120.161 6379 quorum 2
+2307:X 08 Jun 2022 12:50:45.176 * +slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+2307:X 08 Jun 2022 12:50:45.183 * +slave slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+2307:X 08 Jun 2022 12:50:46.248 * +sentinel sentinel cc261e005dab1ab299a306ac716ea970d649c01b 192.168.120.121 27001 @ mymaster 192.168.120.161 6379
+2307:X 08 Jun 2022 12:50:50.213 # +sdown slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+2307:X 08 Jun 2022 12:50:56.884 * +sentinel sentinel 077c4aa60be9f3366998cb11b5b3d5dca592ac39 192.168.120.121 27003 @ mymaster 192.168.120.161 6379
+```
+
+```bash
+kjg1@ubuntu01:~$ redis-sentinel s1/sentinel.conf 
+2275:X 08 Jun 2022 12:49:18.520 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+2275:X 08 Jun 2022 12:49:18.520 # Redis version=6.2.4, bits=64, commit=00000000, modified=0, pid=2275, just started
+2275:X 08 Jun 2022 12:49:18.520 # Configuration loaded
+2275:X 08 Jun 2022 12:49:18.522 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+2275:X 08 Jun 2022 12:49:18.522 * monotonic clock: POSIX clock_gettime
+                _._                                                  
+           _.-``__ ''-._                                             
+      _.-``    `.  `_.  ''-._           Redis 6.2.4 (00000000/0) 64 bit
+  .-`` .-```.  ```\/    _.,_ ''-._                                  
+ (    '      ,       .-`  | `,    )     Running in sentinel mode
+ |`-._`-...-` __...-.``-._|'` _.-'|     Port: 27001
+ |    `-._   `._    /     _.-'    |     PID: 2275
+  `-._    `-._  `-./  _.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |           https://redis.io       
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+ |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+ |    `-._`-._        _.-'_.-'    |                                  
+  `-._    `-._`-.__.-'_.-'    _.-'                                   
+      `-._    `-.__.-'    _.-'                                       
+          `-._        _.-'                                           
+              `-.__.-'                                               
+
+2275:X 08 Jun 2022 12:49:18.525 # Sentinel ID is cc261e005dab1ab299a306ac716ea970d649c01b
+2275:X 08 Jun 2022 12:49:18.525 # +monitor master mymaster 192.168.120.161 6379 quorum 2
+2275:X 08 Jun 2022 12:49:18.529 * +slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:49:18.534 * +slave slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:49:23.578 # +sdown slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:50:47.166 * +sentinel sentinel 635f34cf4fad025ed3014ab4db02cc27efc1a10a 192.168.120.121 27002 @ mymaster 192.168.120.161 6379
+2275:X 08 Jun 2022 12:50:56.884 * +sentinel sentinel 077c4aa60be9f3366998cb11b5b3d5dca592ac39 192.168.120.121 27003 @ mymaster 192.168.120.161 6379
+```
+
+从这个+sentinel可以看到，**只要多个哨兵都监控同一个集群的主节点，这些哨兵就会自动维护成一个哨兵集群。**
+
+## 66-哨兵监控的演示
+
+1. shutdown Master，看一下哨兵的日志（：
+
+   ```bash
+   2307:X 08 Jun 2022 12:50:45.158 # Sentinel ID is 635f34cf4fad025ed3014ab4db02cc27efc1a10a
+   2307:X 08 Jun 2022 12:50:45.158 # +monitor master mymaster 192.168.120.161 6379 quorum 2
+   2307:X 08 Jun 2022 12:50:45.176 * +slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:50:45.183 * +slave slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:50:46.248 * +sentinel sentinel cc261e005dab1ab299a306ac716ea970d649c01b 192.168.120.121 27001 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:50:50.213 # +sdown slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:50:56.884 * +sentinel sentinel 077c4aa60be9f3366998cb11b5b3d5dca592ac39 192.168.120.121 27003 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.191 # +sdown master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.247 # +odown master mymaster 192.168.120.161 6379 #quorum 2/2
+   2307:X 08 Jun 2022 12:53:37.247 # +new-epoch 1
+   2307:X 08 Jun 2022 12:53:37.247 # +try-failover master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.252 # +vote-for-leader 635f34cf4fad025ed3014ab4db02cc27efc1a10a 1
+   2307:X 08 Jun 2022 12:53:37.257 # 077c4aa60be9f3366998cb11b5b3d5dca592ac39 voted for 635f34cf4fad025ed3014ab4db02cc27efc1a10a 1
+   2307:X 08 Jun 2022 12:53:37.257 # cc261e005dab1ab299a306ac716ea970d649c01b voted for 635f34cf4fad025ed3014ab4db02cc27efc1a10a 1
+   2307:X 08 Jun 2022 12:53:37.309 # +elected-leader master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.309 # +failover-state-select-slave master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.376 # +selected-slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.376 * +failover-state-send-slaveof-noone slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.477 * +failover-state-wait-promotion slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.975 # +promoted-slave slave 192.168.120.121:6379 192.168.120.121 6379 @ mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:37.975 # +failover-state-reconf-slaves master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:38.058 # +failover-end master mymaster 192.168.120.161 6379
+   2307:X 08 Jun 2022 12:53:38.058 # +switch-master mymaster 192.168.120.161 6379 192.168.120.121 6379
+   2307:X 08 Jun 2022 12:53:38.058 * +slave slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.121 6379
+   2307:X 08 Jun 2022 12:53:38.058 * +slave slave 192.168.120.161:6379 192.168.120.161 6379 @ mymaster 192.168.120.121 6379
+   2307:X 08 Jun 2022 12:53:43.095 # +sdown slave 192.168.120.161:6379 192.168.120.161 6379 @ mymaster 192.168.120.121 6379
+   2307:X 08 Jun 2022 12:53:43.095 # +sdown slave 192.168.120.122:6379 192.168.120.122 6379 @ mymaster 192.168.120.121 6379
+   
+   ```
+
+   哨兵发现Master没有pong，便认为Master主观下线了（sdown）。当超过quorum个哨兵都认为Master主观下线后，哨兵便认为Master客观下线了（odown）。然后进行故障恢复（try-failover），首先这个哨兵将新Msater的票投给635f34cf4fad025ed3014ab4db02cc27efc1a10a，其他哨兵也是这样，因此最终决定新Master是Ubuntu01（192.168.120.121）。
+
+   选出新Master，只需1个哨兵来进行故障转移，对Ubuntu01的redis执行slaveof no one（+failover-state-send-slaveof-noone），Ubuntu01的Redis此刻变成Master模式：
+
+   ```bash
+   2144:M 08 Jun 2022 12:53:37.477 * Discarding previously cached master state.
+   2144:M 08 Jun 2022 12:53:37.477 # Setting secondary replication ID to 0387cf0d82cd7d3072b8f8e54e77d45da1e128e6, valid up to offset: 41624. New replication ID is 195516c057be00bd61ea440bb3b8dbada742734f
+   2144:M 08 Jun 2022 12:53:37.477 * MASTER MODE enabled (user request from 'id=7 addr=192.168.120.121:59532 laddr=192.168.120.121:6379 fd=10 name=sentinel-635f34cf-cmd age=172 idle=0 flags=x db=0 sub=0 psub=0 multi=4 qbuf=188 qbuf-free=40766 argv-mem=4 obl=45 oll=0 omem=0 tot-mem=61468 events=r cmd=exec user=default redir=-1')
+   2144:M 08 Jun 2022 12:53:37.481 # CONFIG REWRITE executed with success.
+   ```
+
+   然后将旧Master标记为slave（+failover-state-reconf-slaves），将Ubuntu02的Redis执行slaveof命令，让它称为新Master的Slave（+slave slave 192.168.120.122:6379）。
+
+2. 此时重启旧Master，查看集群信息：
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli 
+   127.0.0.1:6379> info replication
+   # Replication
+   role:slave
+   master_host:192.168.120.121
+   master_port:6379
+   master_link_status:up
+   master_last_io_seconds_ago:0
+   master_sync_in_progress:0
+   slave_repl_offset:326851
+   slave_priority:100
+   slave_read_only:1
+   replica_announced:1
+   connected_slaves:1
+   slave0:ip=192.168.120.122,port=6379,state=online,offset=326706,lag=0
+   master_failover_state:no-failover
+   master_replid:195516c057be00bd61ea440bb3b8dbada742734f
+   master_replid2:0000000000000000000000000000000000000000
+   master_repl_offset:326851
+   second_repl_offset:-1
+   repl_backlog_active:1
+   repl_backlog_size:1048576
+   repl_backlog_first_byte_offset:309607
+   repl_backlog_histlen:17245
+   127.0.0.1:6379> 
+   ```
+
+   甚至可以在旧Master的配置文件上发现成为Slave的配置：
+
+   ![image](https://user-images.githubusercontent.com/48977889/172537726-d9aa2d02-9f30-43e0-9588-98479d07d14e.png)
+
+## 67-RestTemplate整合哨兵订阅
+
+RestTemplate的哨兵订阅，底层是基于Lettuce进行的
+
+1. 添加配置：
+
+   ```yaml
+   spring:
+   	redis:
+   		sentinel:
+   			master: mymaster
+   			nodes:
+   				- 192.168.120.121:27001
+   				- 192.168.120.121:27002
+   				- 192.168.120.121:27003
+   ```
+
+   **加上这个配置后，就不用配Redis节点的地址了。对于客户端来说，只需关心哨兵集群的地址信息**
+
+2. 添加配置类
+
+   ```java
+   @Bean
+   public LettuceClientConfigurationBuilderCustomizer configurationBuilderCustomizer(){
+       return configBuilder -> configBuilder.readFrom(ReadFrom.REPLICA_PREFERRED);
+   }
+   ```
+
+   ReadFrom包括：
+
+   1. MASTER：从主节点读
+   2. MASTER_PREFERRED：优先从主节点读
+   3. REPLICA：从子节点读
+   4. REPLICA_PREFERRED：优先从子节点读
+
+3. 配置完成后，使用RedisTemplate进行操作时，写操作会自动转向主节点，读操作会根据2.的配置动态选择。
+
+当然，在实际生产中发现并没有使用客户端整合哨兵订阅，而是使用传统的连接Redis服务的方式。**我猜是阿里云已经做好了配置，我们直接通过客户端连接Redis服务后，对这个服务的请求会被阿里云动态转发到不同的Redis节点上，当然这只是猜测。**
+
