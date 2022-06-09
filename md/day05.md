@@ -535,3 +535,19 @@ Redis分片集群有点类似Es、Kafka的模式，也是对一整个大的数�
 | 主1 192.168.120.122:6379 |   Ubuntu02    |
 | 从1 192.168.120.122:7001 |   Ubuntu02    |
 
+首先给3台机器的Master更改配置，不要replica of，并且开启后台模式，开启集群模式、指定集群的配置文件，这里以Deepin为例：
+
+```
+#replicaof 192.168.120.121:6379 不要replicaof
+
+port 6379
+#开启后台运行
+daemonize yes
+#开启集群模式
+cluster-enabled yes
+#指定集群的配置文件，Redis会自己维护
+cluster-config-file /tmp/cluster/nodes.conf
+```
+
+然后分别配置好3台机子的1主1从结构：
+
