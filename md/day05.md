@@ -579,19 +579,278 @@ Redis分片集群有点类似Es、Kafka的模式，也是对一整个大的数�
    Adding replica 192.168.120.121:7001 to 192.168.120.161:6379
    Adding replica 192.168.120.122:7001 to 192.168.120.121:6379
    Adding replica 192.168.120.161:7001 to 192.168.120.122:6379
-   M: 2f7bcc60fe0c236beddc47e73e05ee3bbba2e81b 192.168.120.161:6379
+   M: 30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379
       slots:[0-5460] (5461 slots) master
-   M: 8142be2c96c770129636c84e29633fab5a8bf25f 192.168.120.121:6379
+   M: 4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379
       slots:[5461-10922] (5462 slots) master
-   M: bbc7fa347e7c017898bedd3854903739eeb0ff24 192.168.120.122:6379
-      slots:[2765],[10923-16383] (5461 slots) master
-   S: 4d0b0ac249c9333029988ddc05ce4993e371bbfc 192.168.120.161:7001
-      replicates bbc7fa347e7c017898bedd3854903739eeb0ff24
-   S: 762bd3dc70c232440e9e517cf2ca688102e6f822 192.168.120.121:7001
-      replicates 2f7bcc60fe0c236beddc47e73e05ee3bbba2e81b
-   S: b24b1187abccff2a81e21ecd6bfa053381827aa1 192.168.120.122:7001
-      replicates 8142be2c96c770129636c84e29633fab5a8bf25f
-   Can I set the above configuration? (type 'yes' to accept): 
+   M: 11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379
+      slots:[10923-16383] (5461 slots) master
+   S: 5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001
+      replicates 11170897c85b0fff2aa98d2b7ed064165871e577
+   S: 12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001
+      replicates 30583f73e607c2c7d06b794dd77cd18d73644df9
+   S: 810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001
+      replicates 4718abefc757d480d2efa965fae59983eafee104
+   Can I set the above configuration? (type 'yes' to accept):
    ```
 
-   询问你是否要按照这样的配置搭建分片集群，如果输入yes，那么集群就会自动创建。**数据分片和主从结构都会确定下来**。这里输入yes
+   询问你是否要按照这样的配置搭建分片集群，如果输入yes，那么集群就会自动创建。**数据分片和主从结构都会确定下来**。这里输入yes:
+   
+   ```bash
+   Can I set the above configuration? (type 'yes' to accept): yes
+   >>> Nodes configuration updated
+   >>> Assign a different config epoch to each node
+   >>> Sending CLUSTER MEET messages to join the cluster
+   Waiting for the cluster to join
+   ...
+   >>> Performing Cluster Check (using node 192.168.120.161:6379)
+   M: 30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379
+      slots:[0-5460] (5461 slots) master
+      1 additional replica(s)
+   S: 12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001
+      slots: (0 slots) slave
+      replicates 30583f73e607c2c7d06b794dd77cd18d73644df9
+   M: 11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379
+      slots:[10923-16383] (5461 slots) master
+      1 additional replica(s)
+   S: 5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001
+      slots: (0 slots) slave
+      replicates 11170897c85b0fff2aa98d2b7ed064165871e577
+   S: 810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001
+      slots: (0 slots) slave
+      replicates 4718abefc757d480d2efa965fae59983eafee104
+   M: 4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379
+      slots:[5461-10922] (5462 slots) master
+      1 additional replica(s)
+   [OK] All nodes agree about slots configuration.
+   >>> Check for open slots...
+   >>> Check slots coverage...
+   [OK] All 16384 slots covered.
+   ```
+   
+   ## 70-Slot
+   
+   1. 1个Redis分片集群会被分成16384个slot，1个slot可以存储多个key，在创建集群的时候采取默认分配策略，将16384个slot均等地分布到多个Master上。可以将这个slot理解为**分片**，承载着数据分片存储、分片获取的作用。**在分片集群中，只有Key在哪个Slot的概念，而不是Key在哪个节点上**。
+   
+   那么怎么确认一个key在哪个slot呢？Redis分片集群采用：CRC16(Key的有效部分) % 16384 这个算法获取slot下标。那什么是Key的有效部分呢？如果一个Key不包含{}，则整个Key都是有效部分。如果一个Key包含{}，并且{}内至少有一个字符，那么{}内的字符部分是有效部分。
+   
+   打个比方，如果Key是num，那么"num"是有效部分。如果Key是{nu}m，那么"nu"是有效部分。
+   
+   2. 使用Redis客户端连接集群，任意新增一个key：
+   
+      ```bash
+      kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli -c -p 7001 
+      127.0.0.1:7001> set {nu}m abc2
+      -> Redirected to slot [1559] located at 192.168.120.161:6379
+      OK
+      192.168.120.161:6379> get {nu}m
+      "abc2"
+      192.168.120.161:6379> 
+      ```
+   
+      可以看到新增的Key被算出在1559 Slot，这个slot被分配在在161这个Master上。
+
+## 71-分片集群的扩容收缩
+
+1. 扩容
+
+   ```
+   redis-cli --cluster add-node ${新节点ip}:${新节点端口} ${已有节点ip}:${已有节点端口} --cluster-slave（是否为Slave） --cluster-master-id（如果声明是slave，那么声明它的Master）
+   ```
+
+   在161再新建一个Redis实例，这次使用7002端口
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-server 7002.conf 
+   13325:C 11 Jun 2022 11:34:06.361 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+   13325:C 11 Jun 2022 11:34:06.361 # Redis version=6.2.4, bits=64, commit=00000000, modified=0, pid=13325, just started
+   13325:C 11 Jun 2022 11:34:06.361 # Configuration loaded
+   13325:M 11 Jun 2022 11:34:06.364 * Increased maximum number of open files to 10032 (it was originally set to 1024).
+   13325:M 11 Jun 2022 11:34:06.364 * monotonic clock: POSIX clock_gettime
+   13325:M 11 Jun 2022 11:34:06.365 * No cluster configuration found, I'm 19568cf8019ceae3880a50dec3ac8888c36c7086
+                   _._                                                  
+              _.-``__ ''-._                                             
+         _.-``    `.  `_.  ''-._           Redis 6.2.4 (00000000/0) 64 bit
+     .-`` .-```.  ```\/    _.,_ ''-._                                  
+    (    '      ,       .-`  | `,    )     Running in cluster mode
+    |`-._`-...-` __...-.``-._|'` _.-'|     Port: 7002
+    |    `-._   `._    /     _.-'    |     PID: 13325
+     `-._    `-._  `-./  _.-'    _.-'                                   
+    |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+    |    `-._`-._        _.-'_.-'    |           https://redis.io       
+     `-._    `-._`-.__.-'_.-'    _.-'                                   
+    |`-._`-._    `-.__.-'    _.-'_.-'|                                  
+    |    `-._`-._        _.-'_.-'    |                                  
+     `-._    `-._`-.__.-'_.-'    _.-'                                   
+         `-._    `-.__.-'    _.-'                                       
+             `-._        _.-'                                           
+                 `-.__.-'                                               
+   
+   13325:M 11 Jun 2022 11:34:06.371 # Server initialized
+   13325:M 11 Jun 2022 11:34:06.372 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+   13325:M 11 Jun 2022 11:34:06.373 * Loading RDB produced by version 6.2.4
+   13325:M 11 Jun 2022 11:34:06.373 * RDB age 2359 seconds
+   13325:M 11 Jun 2022 11:34:06.373 * RDB memory usage when created 2.53 Mb
+   13325:M 11 Jun 2022 11:34:06.373 * DB loaded from disk: 0.000 seconds
+   13325:M 11 Jun 2022 11:34:06.374 * Ready to accept connections
+   ```
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli --cluster add-node 192.168.120.161:7002 192.168.120.161:6379 
+   >>> Adding node 192.168.120.161:7002 to cluster 192.168.120.161:6379
+   >>> Performing Cluster Check (using node 192.168.120.161:6379)
+   M: 30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379
+      slots:[0-5460] (5461 slots) master
+      1 additional replica(s)
+   S: 12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001
+      slots: (0 slots) slave
+      replicates 30583f73e607c2c7d06b794dd77cd18d73644df9
+   M: 11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379
+      slots:[10923-16383] (5461 slots) master
+      1 additional replica(s)
+   S: 5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001
+      slots: (0 slots) slave
+      replicates 11170897c85b0fff2aa98d2b7ed064165871e577
+   S: 810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001
+      slots: (0 slots) slave
+      replicates 4718abefc757d480d2efa965fae59983eafee104
+   M: 4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379
+      slots:[5461-10922] (5462 slots) master
+      1 additional replica(s)
+   [OK] All nodes agree about slots configuration.
+   >>> Check for open slots...
+   >>> Check slots coverage...
+   [OK] All 16384 slots covered.
+   >>> Send CLUSTER MEET to node 192.168.120.161:7002 to make it join the cluster.
+   [OK] New node added correctly.
+   ```
+
+   此时看一下集群信息，可以看到7004虽然加入到集群里了，但是却没被分配Slot，此时7002本质是做不到数据相关操作的：
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli -p 6379 cluster nodes
+   12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001@17001 slave 30583f73e607c2c7d06b794dd77cd18d73644df9 0 1654918988731 1 connected
+   11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379@16379 master - 0 1654918985000 3 connected 10923-16383
+   30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379@16379 myself,master - 0 1654918986000 1 connected 0-5460
+   19568cf8019ceae3880a50dec3ac8888c36c7086 192.168.120.161:7002@17002 master - 0 1654918988000 0 connected
+   5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001@17001 slave 11170897c85b0fff2aa98d2b7ed064165871e577 0 1654918985000 3 connected
+   810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001@17001 slave 4718abefc757d480d2efa965fae59983eafee104 0 1654918987000 2 connected
+   4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379@16379 master - 0 1654918984681 2 connected 5461-10922
+   ```
+
+   可以看到7002这个虽然是master，但是像其他3个6379一样被分配了Slot（0-5460、5461-10922、10923-16383），因此添加节点后，还要进行Slot重分配操作（reshard）：
+
+   redis-cli --cluster reshard ${集群其中1个节点}:${它的端口}
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli --cluster reshard 192.168.120.161:6379
+   >>> Performing Cluster Check (using node 192.168.120.161:6379)
+   M: 30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379
+      slots:[0-5460] (5461 slots) master
+      1 additional replica(s)
+   S: 12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001
+      slots: (0 slots) slave
+      replicates 30583f73e607c2c7d06b794dd77cd18d73644df9
+   M: 11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379
+      slots:[10923-16383] (5461 slots) master
+      1 additional replica(s)
+   M: 19568cf8019ceae3880a50dec3ac8888c36c7086 192.168.120.161:7002
+      slots: (0 slots) master
+   S: 5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001
+      slots: (0 slots) slave
+      replicates 11170897c85b0fff2aa98d2b7ed064165871e577
+   S: 810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001
+      slots: (0 slots) slave
+      replicates 4718abefc757d480d2efa965fae59983eafee104
+   M: 4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379
+      slots:[5461-10922] (5462 slots) master
+      1 additional replica(s)
+   [OK] All nodes agree about slots configuration.
+   >>> Check for open slots...
+   >>> Check slots coverage...
+   [OK] All 16384 slots covered.
+   How many slots do you want to move (from 1 to 16384)? 
+   ```
+
+   此时集群会问你，要移动多少个slot，这里移动前3000个：
+
+   ```bash
+   How many slots do you want to move (from 1 to 16384)? 3000    
+   What is the receiving node ID? 
+   ```
+
+   那这3000个slot要给谁呢？这里要给7002，直接复制7002的ID：
+
+   ```bash
+   What is the receiving node ID? 19568cf8019ceae3880a50dec3ac8888c36c7086
+   Please enter all the source node IDs.
+     Type 'all' to use all the nodes as source nodes for the hash slots.
+     Type 'done' once you entered all the source nodes IDs.
+   Source node #1: 
+   ```
+
+   此时它又会问你，想指定哪个节点为复制slot数据源？这里指定161:6379的ID：
+
+   ```bash
+   Please enter all the source node IDs.
+     Type 'all' to use all the nodes as source nodes for the hash slots.
+     Type 'done' once you entered all the source nodes IDs.
+   Source node #1: 30583f73e607c2c7d06b794dd77cd18d73644df9
+   Source node #2: done
+   
+   Ready to move 3000 slots.
+     Source nodes:
+       M: 30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379
+          slots:[0-5460] (5461 slots) master
+          1 additional replica(s)
+     Destination node:
+       M: 19568cf8019ceae3880a50dec3ac8888c36c7086 192.168.120.161:7002
+          slots: (0 slots) master
+     Resharding plan:
+       Moving slot 0 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 1 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 3 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+   	.
+   	.
+   	.
+       Moving slot 2992 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2993 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2994 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2995 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2996 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2997 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2998 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+       Moving slot 2999 from 30583f73e607c2c7d06b794dd77cd18d73644df9
+   Do you want to proceed with the proposed reshard plan (yes/no)? 
+   ```
+
+   此时它会向你double check一遍，询问是否要将这3000个slot复制过去，此时输入yes：
+
+   ```bash
+   .
+   .
+   .
+   Moving slot 2994 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   Moving slot 2995 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   Moving slot 2996 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   Moving slot 2997 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   Moving slot 2998 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   Moving slot 2999 from 192.168.120.161:6379 to 192.168.120.161:7002: 
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ 
+   ```
+
+   最后看一下节点信息，可以看到slot已经移到7002了：
+
+   ```bash
+   kjg@kjg-PC:/usr/local/redis/redis-6.2.4$ redis-cli -p 6379 cluster nodes
+   12b44759292d62ea4365524c1c92e81ad7eafe5e 192.168.120.121:7001@17001 slave 30583f73e607c2c7d06b794dd77cd18d73644df9 0 1654920351605 1 connected
+   11170897c85b0fff2aa98d2b7ed064165871e577 192.168.120.122:6379@16379 master - 0 1654920350000 3 connected 10923-16383
+   30583f73e607c2c7d06b794dd77cd18d73644df9 192.168.120.161:6379@16379 myself,master - 0 1654920350000 1 connected 3000-5460
+   19568cf8019ceae3880a50dec3ac8888c36c7086 192.168.120.161:7002@17002 master - 0 1654920353000 7 connected 0-2999
+   5e6a76913bfc4e18e1e7a93a74c55c0ae371d522 192.168.120.161:7001@17001 slave 11170897c85b0fff2aa98d2b7ed064165871e577 0 1654920352614 3 connected
+   810913d8af65cfcbfdd28c6712f78421b1e4335f 192.168.120.122:7001@17001 slave 4718abefc757d480d2efa965fae59983eafee104 0 1654920354122 2 connected
+   4718abefc757d480d2efa965fae59983eafee104 192.168.120.121:6379@16379 master - 0 1654920352000 2 connected 5461-10922
+   ```
+
+   
