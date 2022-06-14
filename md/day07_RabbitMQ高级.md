@@ -96,6 +96,58 @@
 
 ## 77-到了Broker后
 
+消息到达Broker后，针对可靠性主要有3点要考虑：1.交换机的持久化 2.队列的持久化 3.消息的持久化。这3个在SpringAMQP里默认都是true的，也就是说消息到达队列并返回ACK给Producer后，意味着在Broker已经持久化成功了。
+
 ## 78-Broker到Consumer
 
+Consumer可以向Broker回复3种应答：ack（消费成功）、nack（消费失败，需要重试）、reject（消费失败，丢弃消息）。Broker和Consumer的可靠性是基于**Consumer到Broker的ack和nack**来完成的。SpringAMQP对于应答支持3种模式：
+
+```yaml
+spring:
+	rabbitmq:
+		listener:
+			simple:
+				prefetch: 1
+				acknowledge-mode: auto
+```
+
+1. manual，需要在业务代码结束后调用api来手动ack或nack。
+2. auto：自动ack，由AOP代理RabbitListener方法，当这个方法正常执行，没有抛运行时异常后，自动ack。抛出异常后返回nack。有点类似声明式事务。**默认就是auto。**
+3. none：Broker不会等待Consumer任何响应，Broker会认为Consumer 100%消费成功，投递出去的消息会被Broker立即删除。
+
+**当一段时间后，Broker发现Consumer还未ack或回复nack（非none），则会向Consumer重新发送该消息。**
+
 ## 79-Consumer失败重拾机制
+
+在非none的前提下，消费者消费失败或超时后Broker会重新发送。如果引起失败的原因是必定出现的，或者说在一段时间内必定会出现的，**就会引起Consumer不断地nack，然后Broker不断地往Consumer重发消息的情况，这样子是很浪费IO性能的**。因此需要一个机制来确保**一段时间内**Broker不会往Consumer重发消息，而是等待Consumer自行把消息处理好，直至超时才重发。**Spring提供了这样的retry机制，当消费者出现异常时会本地重试，而不是无限制的响应nack。**
+
+```yaml
+spring:
+	rabbitmq:
+		listener:
+			simple:
+				prefetch: 1
+				acknowledge-mode: auto
+				retry:
+					enabled: true #开启重试机制
+					initial-interval: 1000 #初始的失败等待时长(ms)
+					multiplier: 2 #下次失败等待时长因子 实际等待时长 = (last-interval * multiplier)
+					max-attempts: 3 #最大重试次数
+					stateless: false #如果业务中包含事务，这里要为false
+```
+
+上面的配置，只会重试3次，这3次的重试时长分别是：1s、2s、4s，那么当重试次数到达阈值后还未ack，消费者会怎么处理呢？此时消费者会触发失败处理策略，有3种，默认使用RejectAndDontRequeueRecoverer。
+
+1. RejectAndDontRequeueRecoverer：向Broker返回reject，告诉Broker这条消息丢掉了。
+2. ImmediateRequeueMessageRecoverer：向Broker返回nack，又开始反复踢皮球（同一条消息不断重发）。
+3. RepublishMessageRecoverer：将失败消息和**Java异常栈信息**投递到指定交换机。
+
+也就是说默认情况下，重试机制用完会就reject，**此时消息就真的丢掉了**。为了保证消息的可靠性，但同时也要避免不断重发和nack到来的性能浪费，我们需要一种兜底的方案，比如将这类消息发送到1个指定的错误消息交换机，又或者自定义MessageRecoverer进行兜底处理，并对这些错误消息进行人工介入。
+
+## 80-所以说，如何保证消息的可靠性呢？
+
+发生消息丢失是要避免的，为了保证消息的可靠性，可以分别从Producer、Consumer、Broker入手：
+
+1. 开启Producer的ack机制，当然最好是异步等待。当回调时发现消息投递失败了，进行重新投递。
+2. Broker开启Exchange、Queue、消息的持久化。
+3. Consumer对消费成功的消息回复ack，消费失败的消息回复nack，并且失败到一定次数后要进行兜底方案（视情况回复reject），对这些错误消息进行人工介入。
