@@ -33,3 +33,69 @@
 3. publisher-return ack：消息到达了Exchange，但未到达Queue。
 
 只有收到confirm ack后，Producer才能认为消息可靠了。对于另外两种不可靠情况，Producer可以自定义解决方案。
+
+关于开启Producer的失败重试机制，有以下几步：
+
+1. 添加配置：
+
+   ```yaml
+   spring:
+   	rabbitmq:
+   		publisher-confirm-type: correlated #针对confirm的确认，#simple，同步等待Broker的确认，直至超时 #correlated，异步等待，需要自定义ConfirmCallBack，Broker确认后会回调这个Callback。
+   		publisher-returns: true #针对return的确认，和confirm确认类似，只不过回调的是ReturnCallBack。
+   		template:
+   			mandatory: true #调用ReturnCallBack，为false则丢弃消息，Producer不管了。
+   ```
+
+2. 编写ReturnCallBack：
+
+   1个RabbitTemplate对应1个ReturnCallBack，因此在RabbitTemplate被注入IOC容器后，就要对其他进行ReturnCallBack定义
+
+   ```java
+   @Configuration
+   @slf4j
+   public class ReturnCallBackConfig implements ApplicationContextAware{
+       
+       @Override
+       public void setApplicationContext(ApplicationContext applicationContext) throws BeansException{
+           RabbitTemplate rabbitTemplate = applicationContext.getBean(RabbitTemplate.class);
+           rabbitTemplate.setReturnCallBack((message, replyCode, replyText, exchange, routingKey)->{
+               log.info("消息进入Queue失败，消息：{},应答码：{},原因：{},交换机：{},路由key：{}", message, replyCode, eplyText, exchange, routingKey);
+           });
+       }
+   }
+   ```
+
+3. 编写CorrelationData：
+
+   1个发送行为对应1个CorrelationData，在RabbitTemplate发送时传入这个CorrelationData参数，即可实现Confirm的回调
+
+   ```java
+   @Autowired
+   private RabbitTemplate rabbitTemplate;
+   
+   public void testCorrelationData(){
+       String msg = "hello";
+       String msgId = UUID.randomUUID().toString();
+       CorrelationData correlationData = new CorrelationData(msgId);
+       correlationData.getFuture().addCallback(
+           result -> {
+               if(result.isAck()){
+                   log.info("消息已到达Queue，ID：{}",correlationData.getId());
+               }else{
+                   log.info("消息到达Exchange，ID：{}，原因：{}",correlationData.getId(),result.getReason());
+               }
+           },
+           ex -> log.error("消息发送异常,ID:{},原因:{}",correlationData.getId(),ex.getMessage());
+       );
+       rabbitTemplate.convertAndSend("","",msg,correlationData);
+   }
+   ```
+
+综上所述，基于Producer与Broker的ack机制，可以实现消息的重新发送，从而防止消息丢失。
+
+## 77-到了Broker后
+
+## 78-Broker到Consumer
+
+## 79-Consumer失败重拾机制
