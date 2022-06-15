@@ -151,3 +151,77 @@ spring:
 1. 开启Producer的ack机制，当然最好是异步等待。当回调时发现消息投递失败了，进行重新投递。
 2. Broker开启Exchange、Queue、消息的持久化。
 3. Consumer对消费成功的消息回复ack，消费失败的消息回复nack，并且失败到一定次数后要进行兜底方案（视情况回复reject），对这些错误消息进行人工介入。
+
+# RabbitMQ的延迟消息
+
+RabbitMQ不提供默认的延迟消息，但是可以通过死信交换机变相实现延迟消息。
+
+## 81-什么是死信？ 
+
+我这里下一个定义，满足其中1个条件的消息，就被称为死信：
+
+1. 消息被Consumer响应了reject。
+2. 消息被Consumer响应了nack，并且这个消息的requeue是false。
+3. 消息的TTL耗尽。
+4. 消息所在的Queue的TTL耗尽。
+5. Queue里的消息堆积满了，此时又来了一个消息，那么最早到的未被消费的消息可能会变成死信。
+
+## 82-死信交换机
+
+RabbitMQ允许为Queue绑定1个死信交换机与1个死信Key，当这个Queue的某个消息变成死信后，Queue会将该死信发送到这个Queue对应的死信交换机上，并传入绑定好的死信Key。死信交换机会根据死信Key将死信放入死信Queue里。
+
+这个有点熟悉，不就是知识点79的RepublishMessageRecoverer嘛？是有点像，不过RepublishMessageRecoverer是消费者将消息转发到另一个Exchange，而死信交换机是被Queue转发死信，两者也是有一定区别的：
+
+RepublishMessageRecoverer：
+
+![image](https://user-images.githubusercontent.com/48977889/173750580-a276a68e-f04a-45f8-a009-a1191a0b94c4.png)
+
+死信交换机：
+
+![image](https://user-images.githubusercontent.com/48977889/173750757-704c95ac-c4d3-48c1-984e-9581f1b2c625.png)
+
+## 83-基于死信交换机+TTL实现延迟消息
+
+如果想用死信交换机与TTL实现延迟消息，那么必须要明确一点：这个消息一开始不会被Consumer所消费，这个消息就是要被等待超时...存入死信Queue的，然后在死信Queue里被Consumer消费：
+
+
+
+## 84-DelayExchange
+
+但是通过死信交换机来实现延迟消息会比较麻烦，首先要有一个不会消费的Queue，再定义1个死信Exchange，稍有不慎就会开发错误，引发Bug。
+
+推荐使用一个开箱即用的工具：DelayExchange。它是1个RabbitMQ社区的插件，封装了原生Exchange，允许DelayExchange在内存中存储消息，到达时间后才放入队列里。使用之前需要在RabbitMQ服务器上安装这个插件。
+
+在Java代码中可以通过@Exchange(name="",delayed="true")或ExchangeBuilder().delayed()创建DelayExchange。
+
+对DelayExchange发消息时需要加一个名为“x-delay”的Header来控制消息TTL：
+
+```java
+MessageBuilder.setHeader("x-delay",10000);
+```
+
+但是DelayExchange本质是将消息困住，不放入Queue，此时Broker会给Producer返回publisher-return ack。因此需要对知识点76的ReturnCallback做一个改造，**避免Producer误以为消息发送失败了，然后重复发送**：
+
+```java
+@Configuration
+@slf4j
+public class ReturnCallBackConfig implements ApplicationContextAware{
+    
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException{
+        RabbitTemplate rabbitTemplate = applicationContext.getBean(RabbitTemplate.class);
+        rabbitTemplate.setReturnCallBack((message, replyCode, replyText, exchange, routingKey)->{
+            
+            if(message.getMessageProperties().getReceivedDelay() > 0){
+                return;
+            }
+            
+            log.info("消息进入Queue失败，消息：{},应答码：{},原因：{},交换机：{},路由key：{}", message, replyCode, eplyText, exchange, routingKey);
+        });
+    }
+}
+```
+
+
+
+# 消息堆积与惰性队列
