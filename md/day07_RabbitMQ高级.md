@@ -158,7 +158,7 @@ RabbitMQ不提供默认的延迟消息，但是可以通过死信交换机变相
 
 ## 81-什么是死信？ 
 
-我这里下一个定义，满足其中1个条件的消息，就被称为死信：
+我这里下一个定义，满足其中1个条件的消息，就被称为死信，**死信在默认情况下会被RabbitMQ清除**：
 
 1. 消息被Consumer响应了reject。
 2. 消息被Consumer响应了nack，并且这个消息的requeue是false。
@@ -184,7 +184,62 @@ RepublishMessageRecoverer：
 
 如果想用死信交换机与TTL实现延迟消息，那么必须要明确一点：这个消息一开始不会被Consumer所消费，这个消息就是要被等待超时...存入死信Queue的，然后在死信Queue里被Consumer消费：
 
+1. 声明普通交换机和普通队列：
 
+   ```java
+   @Bean
+   public DirectExchange simpleExchange(){
+       return new DirectExchange("simpleExchange");
+   }
+   
+   @Bean
+   public Queue simpleQueue(){
+       return QueueBuilder.durable("simpleQueue")
+           .ttl(10000) // 这是队列的ttl
+           .deadLetterExchange("dlExchange") // 指定这个Queue死信交换机
+           .deadLetterRoutingKey("dlKey")	// 指定死信的Key
+           .build();
+   }
+   
+   @Bean
+   public Binding simpleBinding(){
+       return BindingBuilder.bind(simpleQueue()).to(simpleExchange()).with("simple") //通过key=simple来绑定交换机与队列的关系
+   }
+   
+   @Bean
+   @Bean
+   public DirectExchange dlExchange(){
+       return new DirectExchange("dlExchange");
+   }
+   
+   @Bean
+   public Queue dlQueue(){
+       return QueueBuilder.durable("dlQueue").build();
+   }
+   
+   @Bean
+   public Binding dlBinding(){
+       return BindingBuilder.bind(dlQueue()).to(dlExchange()).with("dlKey");
+   }
+   ```
+
+2. 消费者监听dlQueue的消息：
+
+   ```java
+   @Component
+   public class DlListener{
+       @RabbitListener(bindings = @QueueBinding(
+           value = @Queue(name = "dlQueue", durable = "true"),
+           exchange = @Exchange(name = "dlExchange"),
+           key = "dlKey"
+       ))
+       public void listenDlQueue(){
+           sout("消费者接收到死信队列的消息");
+       }
+   }
+   ```
+
+   
 
 ## 84-DelayExchange
 
