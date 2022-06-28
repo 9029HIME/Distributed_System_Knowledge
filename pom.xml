@@ -16,6 +16,7 @@
         <module>seata-account-service</module>
         <module>seata-order-service</module>
         <module>seata-storage-service</module>
+        <module>mycat-learn</module>
 
     </modules>
 
